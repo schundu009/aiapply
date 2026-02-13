@@ -54,5 +54,5 @@ RUN mkdir -p data uploads output
 # Expose port (Railway will override with $PORT)
 EXPOSE 8080
 
-# Run with gunicorn - use shell form to expand $PORT
-CMD gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 2 --timeout 300 --keep-alive 5 app:app
+# Run with gunicorn - use shell to expand $PORT
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --timeout 300 --keep-alive 5 app:app"]
