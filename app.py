@@ -47,7 +47,14 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 @app.route('/health')
 def health_check():
     """Simple health check endpoint for Railway."""
+    print("[Health] Health check called", flush=True)
     return jsonify({'status': 'healthy', 'service': 'autoapply'}), 200
+
+
+@app.before_request
+def log_request():
+    """Log incoming requests for debugging."""
+    print(f"[Request] {request.method} {request.path}", flush=True)
 
 # Global storage for SSE progress updates
 # Key: app_id, Value: {'queue': Queue, 'result': dict, 'complete': bool}
