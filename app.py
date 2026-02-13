@@ -358,8 +358,19 @@ def _mask_key(key):
     return key[:8] + '...' + key[-4:]
 
 
-_load_upload_data()
-_load_applications_data()
+print("[Init] Loading data...", flush=True)
+try:
+    _load_upload_data()
+    print("[Init] Upload data loaded", flush=True)
+except Exception as e:
+    print(f"[Init] Failed to load upload data: {e}", flush=True)
+
+try:
+    _load_applications_data()
+    print("[Init] Applications data loaded", flush=True)
+except Exception as e:
+    print(f"[Init] Failed to load applications data: {e}", flush=True)
+print("[Init] App ready!", flush=True)
 
 
 def get_personal_info_path():
