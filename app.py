@@ -35,6 +35,12 @@ app.config['UPLOAD_FOLDER'] = Path('uploads')
 app.config['UPLOAD_FOLDER'].mkdir(exist_ok=True)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 
+
+@app.route('/health')
+def health_check():
+    """Simple health check endpoint for Railway."""
+    return jsonify({'status': 'healthy', 'service': 'autoapply'}), 200
+
 # Global storage for SSE progress updates
 # Key: app_id, Value: {'queue': Queue, 'result': dict, 'complete': bool}
 apply_progress_store = {}
