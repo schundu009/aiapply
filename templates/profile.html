@@ -1,0 +1,610 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Application Profile</h2>
+</div>
+
+<form id="profile-form">
+    <div class="grid-2">
+        <div class="card">
+            <div class="section-title">Basic Information</div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="first_name">First Name *</label>
+                    <input type="text" id="first_name" name="first_name" value="{{ info.first_name }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="last_name">Last Name *</label>
+                    <input type="text" id="last_name" name="last_name" value="{{ info.last_name }}" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="preferred_name">Preferred Name</label>
+                <input type="text" id="preferred_name" name="preferred_name" value="{{ info.preferred_name }}">
+            </div>
+            <div class="form-group">
+                <label for="email">Email *</label>
+                <input type="email" id="email" name="email" value="{{ info.email }}" required>
+            </div>
+            <div class="form-group">
+                <label for="phone">Phone *</label>
+                <input type="tel" id="phone" name="phone" value="{{ info.phone }}" required>
+            </div>
+            <div class="form-group">
+                <label for="pronouns">Pronouns</label>
+                <select id="pronouns" name="pronouns">
+                    <option value="">Select...</option>
+                    <option value="He/Him" {% if info.pronouns == 'He/Him' %}selected{% endif %}>He/Him</option>
+                    <option value="She/Her" {% if info.pronouns == 'She/Her' %}selected{% endif %}>She/Her</option>
+                    <option value="They/Them" {% if info.pronouns == 'They/Them' %}selected{% endif %}>They/Them</option>
+                    <option value="Other" {% if info.pronouns == 'Other' %}selected{% endif %}>Other</option>
+                </select>
+            </div>
+
+            <div class="section-title">Address</div>
+            <div class="form-group">
+                <label for="address">Street Address *</label>
+                <input type="text" id="address" name="address" value="{{ info.address }}" required>
+            </div>
+            <div class="form-group">
+                <label for="address_line_2">Address Line 2</label>
+                <input type="text" id="address_line_2" name="address_line_2" value="{{ info.address_line_2 }}">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="city">City *</label>
+                    <input type="text" id="city" name="city" value="{{ info.city }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="state">State *</label>
+                    <input type="text" id="state" name="state" value="{{ info.state }}" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="zip_code">ZIP Code *</label>
+                    <input type="text" id="zip_code" name="zip_code" value="{{ info.zip_code }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="country">Country *</label>
+                    <input type="text" id="country" name="country" value="{{ info.country or 'United States' }}" required>
+                </div>
+            </div>
+
+            <div class="section-title">Online Profiles</div>
+            <div class="form-group">
+                <label for="linkedin">LinkedIn URL</label>
+                <input type="url" id="linkedin" name="linkedin" value="{{ info.linkedin }}" placeholder="https://linkedin.com/in/yourprofile">
+            </div>
+            <div class="form-group">
+                <label for="github">GitHub URL</label>
+                <input type="url" id="github" name="github" value="{{ info.github }}" placeholder="https://github.com/username">
+            </div>
+            <div class="form-group">
+                <label for="portfolio">Portfolio URL</label>
+                <input type="url" id="portfolio" name="portfolio" value="{{ info.portfolio }}">
+            </div>
+            <div class="form-group">
+                <label for="website">Personal Website</label>
+                <input type="url" id="website" name="website" value="{{ info.website }}">
+            </div>
+
+            <div class="section-title">Current Employment</div>
+            <div class="form-group">
+                <label for="current_company">Current Company</label>
+                <input type="text" id="current_company" name="current_company" value="{{ info.current_company }}">
+            </div>
+            <div class="form-group">
+                <label for="current_title">Current Title</label>
+                <input type="text" id="current_title" name="current_title" value="{{ info.current_title }}">
+            </div>
+            <div class="form-group">
+                <label for="current_employer">Are you currently employed here?</label>
+                <select id="current_employer" name="current_employer">
+                    <option value="No" {% if info.current_employer == 'No' %}selected{% endif %}>No</option>
+                    <option value="Yes" {% if info.current_employer == 'Yes' %}selected{% endif %}>Yes</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="section-title">Work Authorization</div>
+            <div class="form-group">
+                <label for="work_authorization">Authorization Status *</label>
+                <select id="work_authorization" name="work_authorization" required>
+                    <option value="US Citizen" {% if info.work_authorization == 'US Citizen' %}selected{% endif %}>US Citizen</option>
+                    <option value="Green Card/Permanent Resident" {% if info.work_authorization == 'Green Card/Permanent Resident' %}selected{% endif %}>Green Card/Permanent Resident</option>
+                    <option value="H1B Visa" {% if info.work_authorization == 'H1B Visa' %}selected{% endif %}>H1B Visa</option>
+                    <option value="L1 Visa" {% if info.work_authorization == 'L1 Visa' %}selected{% endif %}>L1 Visa</option>
+                    <option value="O1 Visa" {% if info.work_authorization == 'O1 Visa' %}selected{% endif %}>O1 Visa</option>
+                    <option value="OPT" {% if info.work_authorization == 'OPT' %}selected{% endif %}>OPT</option>
+                    <option value="CPT" {% if info.work_authorization == 'CPT' %}selected{% endif %}>CPT</option>
+                    <option value="TN Visa" {% if info.work_authorization == 'TN Visa' %}selected{% endif %}>TN Visa</option>
+                    <option value="Need Sponsorship" {% if info.work_authorization == 'Need Sponsorship' %}selected{% endif %}>Need Sponsorship</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="legally_authorized">Legally authorized to work in the US? *</label>
+                <select id="legally_authorized" name="legally_authorized" required>
+                    <option value="Yes" {% if info.legally_authorized == 'Yes' %}selected{% endif %}>Yes</option>
+                    <option value="No" {% if info.legally_authorized == 'No' %}selected{% endif %}>No</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="requires_sponsorship">Require visa sponsorship? *</label>
+                <select id="requires_sponsorship" name="requires_sponsorship" required>
+                    <option value="No" {% if info.requires_sponsorship == 'No' %}selected{% endif %}>No</option>
+                    <option value="Yes" {% if info.requires_sponsorship == 'Yes' %}selected{% endif %}>Yes</option>
+                    <option value="Yes, now or in future" {% if info.requires_sponsorship == 'Yes, now or in future' %}selected{% endif %}>Yes, now or in future</option>
+                </select>
+            </div>
+
+            <div class="section-title">Preferences</div>
+            <div class="form-group">
+                <label for="willing_to_relocate">Willing to relocate?</label>
+                <select id="willing_to_relocate" name="willing_to_relocate">
+                    <option value="Yes" {% if info.willing_to_relocate == 'Yes' %}selected{% endif %}>Yes</option>
+                    <option value="No" {% if info.willing_to_relocate == 'No' %}selected{% endif %}>No</option>
+                    <option value="Yes, for the right opportunity" {% if info.willing_to_relocate == 'Yes, for the right opportunity' %}selected{% endif %}>Yes, for the right opportunity</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="relocation_locations">Preferred Locations</label>
+                <input type="text" id="relocation_locations" name="relocation_locations" value="{{ info.relocation_locations }}" placeholder="SF Bay Area, NYC, Remote">
+            </div>
+            <div class="form-group">
+                <label for="remote_preference">Remote Preference</label>
+                <select id="remote_preference" name="remote_preference">
+                    <option value="Remote" {% if info.remote_preference == 'Remote' %}selected{% endif %}>Remote</option>
+                    <option value="Hybrid" {% if info.remote_preference == 'Hybrid' %}selected{% endif %}>Hybrid</option>
+                    <option value="On-site" {% if info.remote_preference == 'On-site' %}selected{% endif %}>On-site</option>
+                    <option value="Flexible" {% if info.remote_preference == 'Flexible' %}selected{% endif %}>Flexible</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="willing_to_travel">Willing to travel?</label>
+                <select id="willing_to_travel" name="willing_to_travel">
+                    <option value="No travel" {% if info.willing_to_travel == 'No travel' %}selected{% endif %}>No travel</option>
+                    <option value="Up to 25%" {% if info.willing_to_travel == 'Up to 25%' %}selected{% endif %}>Up to 25%</option>
+                    <option value="Up to 50%" {% if info.willing_to_travel == 'Up to 50%' %}selected{% endif %}>Up to 50%</option>
+                    <option value="Up to 75%" {% if info.willing_to_travel == 'Up to 75%' %}selected{% endif %}>Up to 75%</option>
+                    <option value="100%" {% if info.willing_to_travel == '100%' %}selected{% endif %}>100%</option>
+                </select>
+            </div>
+
+            <div class="section-title">Compensation</div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="expected_salary_min">Salary Minimum</label>
+                    <input type="text" id="expected_salary_min" name="expected_salary_min" value="{{ info.expected_salary_min }}" placeholder="150000">
+                </div>
+                <div class="form-group">
+                    <label for="expected_salary_max">Salary Maximum</label>
+                    <input type="text" id="expected_salary_max" name="expected_salary_max" value="{{ info.expected_salary_max }}" placeholder="200000">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="salary_currency">Currency</label>
+                <select id="salary_currency" name="salary_currency">
+                    <option value="USD" {% if info.salary_currency == 'USD' %}selected{% endif %}>USD</option>
+                    <option value="EUR" {% if info.salary_currency == 'EUR' %}selected{% endif %}>EUR</option>
+                    <option value="GBP" {% if info.salary_currency == 'GBP' %}selected{% endif %}>GBP</option>
+                    <option value="CAD" {% if info.salary_currency == 'CAD' %}selected{% endif %}>CAD</option>
+                </select>
+            </div>
+
+            <div class="section-title">Availability</div>
+            <div class="form-group">
+                <label for="available_start">Available to start</label>
+                <select id="available_start" name="available_start">
+                    <option value="Immediately" {% if info.available_start == 'Immediately' %}selected{% endif %}>Immediately</option>
+                    <option value="2 weeks notice" {% if info.available_start == '2 weeks notice' %}selected{% endif %}>2 weeks notice</option>
+                    <option value="1 month notice" {% if info.available_start == '1 month notice' %}selected{% endif %}>1 month notice</option>
+                    <option value="2 months notice" {% if info.available_start == '2 months notice' %}selected{% endif %}>2 months notice</option>
+                    <option value="3+ months notice" {% if info.available_start == '3+ months notice' %}selected{% endif %}>3+ months notice</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="notice_period">Notice Period</label>
+                <input type="text" id="notice_period" name="notice_period" value="{{ info.notice_period or '2 weeks' }}">
+            </div>
+
+            <div class="section-title">Experience & Education</div>
+            <div class="form-group">
+                <label for="years_experience">Total Years of Experience</label>
+                <input type="text" id="years_experience" name="years_experience" value="{{ info.years_experience }}">
+            </div>
+            <div class="form-group">
+                <label for="highest_education">Highest Education</label>
+                <select id="highest_education" name="highest_education">
+                    <option value="High School" {% if info.highest_education == 'High School' %}selected{% endif %}>High School</option>
+                    <option value="Associate's Degree" {% if info.highest_education == "Associate's Degree" %}selected{% endif %}>Associate's Degree</option>
+                    <option value="Bachelor's Degree" {% if info.highest_education == "Bachelor's Degree" %}selected{% endif %}>Bachelor's Degree</option>
+                    <option value="Master's Degree" {% if info.highest_education == "Master's Degree" %}selected{% endif %}>Master's Degree</option>
+                    <option value="Doctorate/PhD" {% if info.highest_education == 'Doctorate/PhD' %}selected{% endif %}>Doctorate/PhD</option>
+                    <option value="Professional Degree" {% if info.highest_education == 'Professional Degree' %}selected{% endif %}>Professional Degree</option>
+                </select>
+            </div>
+
+            <div class="section-title">Application Source</div>
+            <div class="form-group">
+                <label for="how_did_you_hear">How did you hear about us?</label>
+                <select id="how_did_you_hear" name="how_did_you_hear">
+                    <option value="LinkedIn" {% if info.how_did_you_hear == 'LinkedIn' %}selected{% endif %}>LinkedIn</option>
+                    <option value="Indeed" {% if info.how_did_you_hear == 'Indeed' %}selected{% endif %}>Indeed</option>
+                    <option value="Glassdoor" {% if info.how_did_you_hear == 'Glassdoor' %}selected{% endif %}>Glassdoor</option>
+                    <option value="Company Website" {% if info.how_did_you_hear == 'Company Website' %}selected{% endif %}>Company Website</option>
+                    <option value="Referral" {% if info.how_did_you_hear == 'Referral' %}selected{% endif %}>Referral</option>
+                    <option value="Recruiter" {% if info.how_did_you_hear == 'Recruiter' %}selected{% endif %}>Recruiter</option>
+                    <option value="Job Board" {% if info.how_did_you_hear == 'Job Board' %}selected{% endif %}>Job Board</option>
+                    <option value="Other" {% if info.how_did_you_hear == 'Other' %}selected{% endif %}>Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="referral_name">Referral Name (if applicable)</label>
+                <input type="text" id="referral_name" name="referral_name" value="{{ info.referral_name }}">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="previously_applied">Previously applied?</label>
+                    <select id="previously_applied" name="previously_applied">
+                        <option value="No" {% if info.previously_applied == 'No' %}selected{% endif %}>No</option>
+                        <option value="Yes" {% if info.previously_applied == 'Yes' %}selected{% endif %}>Yes</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="previously_employed">Previously employed here?</label>
+                    <select id="previously_employed" name="previously_employed">
+                        <option value="No" {% if info.previously_employed == 'No' %}selected{% endif %}>No</option>
+                        <option value="Yes, currently" {% if info.previously_employed == 'Yes, currently' %}selected{% endif %}>Yes, currently</option>
+                        <option value="Yes, previously" {% if info.previously_employed == 'Yes, previously' %}selected{% endif %}>Yes, previously</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="section-title">Voluntary Self-Identification (EEOC)</div>
+        <p class="helper-text" style="margin-bottom: 16px;">This information is voluntary and will not affect your application.</p>
+
+        <div class="form-row-4">
+            <div class="form-group">
+                <label for="gender">Gender</label>
+                <select id="gender" name="gender">
+                    <option value="Decline to self-identify" {% if info.gender == 'Decline to self-identify' %}selected{% endif %}>Decline to self-identify</option>
+                    <option value="Male" {% if info.gender == 'Male' %}selected{% endif %}>Male</option>
+                    <option value="Female" {% if info.gender == 'Female' %}selected{% endif %}>Female</option>
+                    <option value="Non-binary" {% if info.gender == 'Non-binary' %}selected{% endif %}>Non-binary</option>
+                    <option value="Other" {% if info.gender == 'Other' %}selected{% endif %}>Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="race_ethnicity">Race/Ethnicity</label>
+                <select id="race_ethnicity" name="race_ethnicity">
+                    <option value="Decline to self-identify" {% if info.race_ethnicity == 'Decline to self-identify' %}selected{% endif %}>Decline to self-identify</option>
+                    <option value="American Indian/Alaska Native" {% if info.race_ethnicity == 'American Indian/Alaska Native' %}selected{% endif %}>American Indian/Alaska Native</option>
+                    <option value="Asian" {% if info.race_ethnicity == 'Asian' %}selected{% endif %}>Asian</option>
+                    <option value="Black/African American" {% if info.race_ethnicity == 'Black/African American' %}selected{% endif %}>Black/African American</option>
+                    <option value="Hispanic/Latino" {% if info.race_ethnicity == 'Hispanic/Latino' %}selected{% endif %}>Hispanic/Latino</option>
+                    <option value="Native Hawaiian/Pacific Islander" {% if info.race_ethnicity == 'Native Hawaiian/Pacific Islander' %}selected{% endif %}>Native Hawaiian/Pacific Islander</option>
+                    <option value="White" {% if info.race_ethnicity == 'White' %}selected{% endif %}>White</option>
+                    <option value="Two or more races" {% if info.race_ethnicity == 'Two or more races' %}selected{% endif %}>Two or more races</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="veteran_status">Veteran Status</label>
+                <select id="veteran_status" name="veteran_status">
+                    <option value="Decline to self-identify" {% if info.veteran_status == 'Decline to self-identify' %}selected{% endif %}>Decline to self-identify</option>
+                    <option value="I am a veteran" {% if info.veteran_status == 'I am a veteran' %}selected{% endif %}>I am a veteran</option>
+                    <option value="I am not a veteran" {% if info.veteran_status == 'I am not a veteran' %}selected{% endif %}>I am not a veteran</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="disability_status">Disability Status</label>
+                <select id="disability_status" name="disability_status">
+                    <option value="Decline to self-identify" {% if info.disability_status == 'Decline to self-identify' %}selected{% endif %}>Decline to self-identify</option>
+                    <option value="Yes, I have a disability" {% if info.disability_status == 'Yes, I have a disability' %}selected{% endif %}>Yes, I have a disability</option>
+                    <option value="No, I do not have a disability" {% if info.disability_status == 'No, I do not have a disability' %}selected{% endif %}>No, I do not have a disability</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="section-title">Compliance & Legal</div>
+        <div class="form-row-4">
+            <div class="form-group">
+                <label for="government_employee">Government Employee/Official?</label>
+                <select id="government_employee" name="government_employee">
+                    <option value="No" {% if info.government_employee == 'No' %}selected{% endif %}>No</option>
+                    <option value="Yes" {% if info.government_employee == 'Yes' %}selected{% endif %}>Yes</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="non_compete">Subject to Non-Compete?</label>
+                <select id="non_compete" name="non_compete">
+                    <option value="No" {% if info.non_compete == 'No' %}selected{% endif %}>No</option>
+                    <option value="Yes" {% if info.non_compete == 'Yes' %}selected{% endif %}>Yes</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="background_check_consent">Background Check Consent</label>
+                <select id="background_check_consent" name="background_check_consent">
+                    <option value="Yes" {% if info.background_check_consent == 'Yes' %}selected{% endif %}>Yes</option>
+                    <option value="No" {% if info.background_check_consent == 'No' %}selected{% endif %}>No</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="privacy_agreement">Privacy Agreement Acceptance *</label>
+                <select id="privacy_agreement" name="privacy_agreement">
+                    <option value="Yes" {% if info.privacy_agreement == 'Yes' %}selected{% endif %}>Yes</option>
+                    <option value="No" {% if info.privacy_agreement == 'No' %}selected{% endif %}>No</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="section-title">Job Board & ATS Credentials</div>
+        <p class="helper-text" style="margin-bottom: 16px;">Login credentials for automatic form filling on job sites. Stored locally.</p>
+
+        <div class="form-row" style="margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--border);">
+            <div class="form-group" style="flex: 2;">
+                <label for="default_job_password">Default Password for New Accounts</label>
+                <input type="password" id="default_job_password" name="default_job_password" value="{{ info.default_job_password }}" placeholder="Used when auto-creating accounts">
+            </div>
+            <div class="form-group" style="flex: 1; display: flex; align-items: flex-end;">
+                <button type="button" id="create-accounts-btn" class="btn btn-secondary" style="width: 100%;">Create All Accounts</button>
+            </div>
+        </div>
+        <div id="account-status" style="margin-bottom: 16px;"></div>
+
+        <div class="grid-2">
+            <div>
+                <div class="section-title" style="font-size: 12px;">Google (for OAuth logins)</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="google_email">Google Email</label>
+                        <input type="email" id="google_email" name="google_email" value="{{ info.google_email }}" placeholder="you@gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="google_password">Google Password</label>
+                        <input type="password" id="google_password" name="google_password" value="{{ info.google_password }}">
+                    </div>
+                </div>
+
+                <div class="section-title" style="font-size: 12px;">LinkedIn</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="linkedin_email">LinkedIn Email</label>
+                        <input type="email" id="linkedin_email" name="linkedin_email" value="{{ info.linkedin_email }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="linkedin_password">LinkedIn Password</label>
+                        <input type="password" id="linkedin_password" name="linkedin_password" value="{{ info.linkedin_password }}">
+                    </div>
+                </div>
+
+                <div class="section-title" style="font-size: 12px;">Workday</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="workday_email">Workday Email</label>
+                        <input type="email" id="workday_email" name="workday_email" value="{{ info.workday_email }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="workday_password">Workday Password</label>
+                        <input type="password" id="workday_password" name="workday_password" value="{{ info.workday_password }}">
+                    </div>
+                </div>
+
+                <div class="section-title" style="font-size: 12px;">Greenhouse</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="greenhouse_email">Greenhouse Email</label>
+                        <input type="email" id="greenhouse_email" name="greenhouse_email" value="{{ info.greenhouse_email }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="greenhouse_password">Greenhouse Password</label>
+                        <input type="password" id="greenhouse_password" name="greenhouse_password" value="{{ info.greenhouse_password }}">
+                    </div>
+                </div>
+
+                <div class="section-title" style="font-size: 12px;">Lever</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="lever_email">Lever Email</label>
+                        <input type="email" id="lever_email" name="lever_email" value="{{ info.lever_email }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="lever_password">Lever Password</label>
+                        <input type="password" id="lever_password" name="lever_password" value="{{ info.lever_password }}">
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="section-title" style="font-size: 12px;">Ashby</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="ashby_email">Ashby Email</label>
+                        <input type="email" id="ashby_email" name="ashby_email" value="{{ info.ashby_email }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="ashby_password">Ashby Password</label>
+                        <input type="password" id="ashby_password" name="ashby_password" value="{{ info.ashby_password }}">
+                    </div>
+                </div>
+
+                <div class="section-title" style="font-size: 12px;">iCIMS</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="icims_email">iCIMS Email</label>
+                        <input type="email" id="icims_email" name="icims_email" value="{{ info.icims_email }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="icims_password">iCIMS Password</label>
+                        <input type="password" id="icims_password" name="icims_password" value="{{ info.icims_password }}">
+                    </div>
+                </div>
+
+                <div class="section-title" style="font-size: 12px;">Taleo</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="taleo_email">Taleo Email</label>
+                        <input type="email" id="taleo_email" name="taleo_email" value="{{ info.taleo_email }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="taleo_password">Taleo Password</label>
+                        <input type="password" id="taleo_password" name="taleo_password" value="{{ info.taleo_password }}">
+                    </div>
+                </div>
+
+                <div class="section-title" style="font-size: 12px;">SmartRecruiters</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="smartrecruiters_email">SmartRecruiters Email</label>
+                        <input type="email" id="smartrecruiters_email" name="smartrecruiters_email" value="{{ info.smartrecruiters_email }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="smartrecruiters_password">SmartRecruiters Password</label>
+                        <input type="password" id="smartrecruiters_password" name="smartrecruiters_password" value="{{ info.smartrecruiters_password }}">
+                    </div>
+                </div>
+
+                <div class="section-title" style="font-size: 12px;">Jobvite</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="jobvite_email">Jobvite Email</label>
+                        <input type="email" id="jobvite_email" name="jobvite_email" value="{{ info.jobvite_email }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="jobvite_password">Jobvite Password</label>
+                        <input type="password" id="jobvite_password" name="jobvite_password" value="{{ info.jobvite_password }}">
+                    </div>
+                </div>
+
+                <div class="section-title" style="font-size: 12px;">BambooHR</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="bamboohr_email">BambooHR Email</label>
+                        <input type="email" id="bamboohr_email" name="bamboohr_email" value="{{ info.bamboohr_email }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="bamboohr_password">BambooHR Password</label>
+                        <input type="password" id="bamboohr_password" name="bamboohr_password" value="{{ info.bamboohr_password }}">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary btn-block" style="max-width: 300px;">Save Profile</button>
+    <div id="save-status" style="margin-top: 16px;"></div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('profile-form');
+    const statusDiv = document.getElementById('save-status');
+    const accountStatusDiv = document.getElementById('account-status');
+    const createAccountsBtn = document.getElementById('create-accounts-btn');
+
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const formData = new FormData(form);
+        const data = {};
+        formData.forEach((value, key) => data[key] = value);
+
+        try {
+            const response = await fetch('/api/profile', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            if (result.success) {
+                statusDiv.innerHTML = '<div class="alert alert-success">Profile saved successfully</div>';
+            } else {
+                statusDiv.innerHTML = '<div class="alert alert-error">Failed to save profile</div>';
+            }
+            setTimeout(() => statusDiv.innerHTML = '', 3000);
+        } catch (err) {
+            statusDiv.innerHTML = '<div class="alert alert-error">Error: ' + err.message + '</div>';
+        }
+    });
+
+    // Create job board accounts
+    createAccountsBtn.addEventListener('click', async function() {
+        createAccountsBtn.disabled = true;
+        createAccountsBtn.textContent = 'Creating...';
+        accountStatusDiv.innerHTML = `
+            <div class="alert" style="background: var(--primary-light); color: white;">
+                <strong>Creating accounts on job boards...</strong>
+                <div id="account-logs" style="margin-top: 10px; font-family: monospace; font-size: 11px; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,0.2); padding: 8px; border-radius: 4px;">
+                    Initializing...
+                </div>
+            </div>`;
+
+        const logsDiv = document.getElementById('account-logs');
+
+        try {
+            const response = await fetch('/api/create-accounts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            const result = await response.json();
+
+            // Display logs
+            if (result.logs && result.logs.length > 0) {
+                logsDiv.innerHTML = result.logs.map(log => `<div>${log}</div>`).join('');
+            }
+
+            if (result.success) {
+                let html = '<div class="alert alert-success"><strong>Account setup complete:</strong>';
+
+                // Show logs
+                if (result.logs && result.logs.length > 0) {
+                    html += `<div style="margin: 10px 0; font-family: monospace; font-size: 11px; max-height: 150px; overflow-y: auto; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px;">`;
+                    html += result.logs.map(log => `<div>${log}</div>`).join('');
+                    html += '</div>';
+                }
+
+                html += '<ul style="margin: 8px 0 0 0; padding-left: 20px;">';
+                for (const [platform, info] of Object.entries(result.results)) {
+                    const status = info.success ? '✓' : '✗';
+                    const msg = info.message || info.error || 'Ready';
+                    html += `<li><strong>${platform}</strong>: ${status} ${msg}`;
+                    if (info.logs && info.logs.length > 0) {
+                        html += `<div style="font-size: 10px; color: var(--text-muted); margin-left: 10px;">${info.logs.slice(-2).join(' → ')}</div>`;
+                    }
+                    html += '</li>';
+                }
+                html += '</ul></div>';
+                accountStatusDiv.innerHTML = html;
+
+                // Reload page to show updated credentials
+                setTimeout(() => location.reload(), 5000);
+            } else {
+                let html = `<div class="alert alert-error"><strong>Failed:</strong> ${result.error}`;
+                if (result.logs && result.logs.length > 0) {
+                    html += `<div style="margin-top: 10px; font-family: monospace; font-size: 11px; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 4px;">`;
+                    html += result.logs.map(log => `<div>${log}</div>`).join('');
+                    html += '</div>';
+                }
+                html += '</div>';
+                accountStatusDiv.innerHTML = html;
+            }
+        } catch (err) {
+            accountStatusDiv.innerHTML = `<div class="alert alert-error">Error: ${err.message}<br><small>Make sure you have saved your profile with email, first name, and last name.</small></div>`;
+        } finally {
+            createAccountsBtn.disabled = false;
+            createAccountsBtn.textContent = 'Create All Accounts';
+        }
+    });
+});
+{% endblock %}

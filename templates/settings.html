@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Settings</h2>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3>LLM API Keys</h3>
+    </div>
+
+    <form id="settings-form">
+        <div class="form-group">
+            <label for="anthropic_key">Anthropic API Key</label>
+            <input type="password" id="anthropic_key" name="anthropic_key"
+                   value="{{ settings.anthropic_key or '' }}"
+                   placeholder="sk-ant-api03-...">
+            <p class="helper-text">Get your key from <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a></p>
+        </div>
+
+        <div class="form-group">
+            <label for="openai_key">OpenAI API Key (Optional)</label>
+            <input type="password" id="openai_key" name="openai_key"
+                   value="{{ settings.openai_key or '' }}"
+                   placeholder="sk-...">
+            <p class="helper-text">Get your key from <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a></p>
+        </div>
+
+        <div class="form-group">
+            <label for="google_key">Google AI API Key (Optional)</label>
+            <input type="password" id="google_key" name="google_key"
+                   value="{{ settings.google_key or '' }}"
+                   placeholder="AIza...">
+            <p class="helper-text">Get your key from <a href="https://makersuite.google.com/app/apikey" target="_blank">Google AI Studio</a></p>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <button type="submit" class="btn btn-primary">Save Settings</button>
+            </div>
+            <div class="form-group">
+                <button type="button" class="btn btn-secondary" onclick="toggleKeys()">Show/Hide Keys</button>
+            </div>
+        </div>
+    </form>
+
+    <div id="save-status" class="alert" style="display: none;"></div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3>Email Notifications (Optional)</h3>
+    </div>
+
+    <form id="email-settings-form">
+        <div class="form-row">
+            <div class="form-group">
+                <label for="smtp_host">SMTP Host</label>
+                <input type="text" id="smtp_host" name="smtp_host"
+                       value="{{ settings.smtp_host or '' }}"
+                       placeholder="smtp.gmail.com">
+            </div>
+            <div class="form-group">
+                <label for="smtp_port">SMTP Port</label>
+                <input type="number" id="smtp_port" name="smtp_port"
+                       value="{{ settings.smtp_port or '587' }}"
+                       placeholder="587">
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label for="smtp_user">SMTP Username</label>
+                <input type="text" id="smtp_user" name="smtp_user"
+                       value="{{ settings.smtp_user or '' }}"
+                       placeholder="your-email@gmail.com">
+            </div>
+            <div class="form-group">
+                <label for="smtp_password">SMTP Password</label>
+                <input type="password" id="smtp_password" name="smtp_password"
+                       value="{{ settings.smtp_password or '' }}"
+                       placeholder="App password">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <button type="submit" class="btn btn-primary">Save Email Settings</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+function toggleKeys() {
+    const inputs = document.querySelectorAll('input[type="password"]');
+    inputs.forEach(input => {
+        input.type = input.type === 'password' ? 'text' : 'password';
+    });
+}
+
+document.getElementById('settings-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = document.getElementById('save-status');
+
+    const data = {
+        anthropic_key: document.getElementById('anthropic_key').value,
+        openai_key: document.getElementById('openai_key').value,
+        google_key: document.getElementById('google_key').value
+    };
+
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            status.className = 'alert alert-success';
+            status.textContent = 'Settings saved successfully!';
+        } else {
+            status.className = 'alert alert-error';
+            status.textContent = 'Error: ' + result.error;
+        }
+        status.style.display = 'block';
+
+        setTimeout(() => { status.style.display = 'none'; }, 3000);
+    } catch (err) {
+        status.className = 'alert alert-error';
+        status.textContent = 'Error saving settings';
+        status.style.display = 'block';
+    }
+});
+
+document.getElementById('email-settings-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = document.getElementById('save-status');
+
+    const data = {
+        smtp_host: document.getElementById('smtp_host').value,
+        smtp_port: document.getElementById('smtp_port').value,
+        smtp_user: document.getElementById('smtp_user').value,
+        smtp_password: document.getElementById('smtp_password').value
+    };
+
+    try {
+        const response = await fetch('/api/settings/email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            status.className = 'alert alert-success';
+            status.textContent = 'Email settings saved!';
+        } else {
+            status.className = 'alert alert-error';
+            status.textContent = 'Error: ' + result.error;
+        }
+        status.style.display = 'block';
+
+        setTimeout(() => { status.style.display = 'none'; }, 3000);
+    } catch (err) {
+        status.className = 'alert alert-error';
+        status.textContent = 'Error saving email settings';
+        status.style.display = 'block';
+    }
+});
+{% endblock %}

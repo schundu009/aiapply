@@ -1,0 +1,595 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Application Tracking</h2>
+</div>
+
+{% if applications %}
+<!-- Summary Stats -->
+<div class="tracking-stats">
+    <div class="tracking-stat">
+        <div class="tracking-stat-value">{{ applications|length }}</div>
+        <div class="tracking-stat-label">Total</div>
+    </div>
+    <div class="tracking-stat">
+        <div class="tracking-stat-value" style="color: var(--success);">
+            {{ applications|selectattr('status.value', 'equalto', 'submitted')|list|length }}
+        </div>
+        <div class="tracking-stat-label">Submitted</div>
+    </div>
+    <div class="tracking-stat">
+        <div class="tracking-stat-value" style="color: var(--warning);">
+            {{ applications|selectattr('status.value', 'equalto', 'form_filled')|list|length + applications|selectattr('status.value', 'equalto', 'manual_required')|list|length }}
+        </div>
+        <div class="tracking-stat-label">Pending Action</div>
+    </div>
+    <div class="tracking-stat">
+        <div class="tracking-stat-value" style="color: var(--accent);">
+            {{ applications|selectattr('status.value', 'equalto', 'pdf_generated')|list|length }}
+        </div>
+        <div class="tracking-stat-label">Ready to Apply</div>
+    </div>
+    <div class="tracking-stat">
+        <div class="tracking-stat-value" style="color: var(--error);">
+            {{ applications|selectattr('status.value', 'equalto', 'failed')|list|length }}
+        </div>
+        <div class="tracking-stat-label">Failed</div>
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <div class="card-header">
+        <h3>Applications</h3>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn btn-sm btn-secondary" id="expand-all">Expand All</button>
+            <button class="btn btn-sm btn-secondary" id="collapse-all">Collapse All</button>
+            <button class="btn btn-sm btn-danger" id="clear-history">Clear History</button>
+        </div>
+    </div>
+
+    {% if applications %}
+    <!-- Filter Controls -->
+    <div class="filter-controls">
+        <select class="filter-select" id="filter-status">
+            <option value="">All Statuses</option>
+            <option value="submitted">Submitted</option>
+            <option value="form_filled">Form Filled</option>
+            <option value="pdf_generated">Ready to Apply</option>
+            <option value="manual_required">Manual Required</option>
+            <option value="failed">Failed</option>
+        </select>
+        <select class="filter-select" id="sort-by">
+            <option value="date-desc">Newest First</option>
+            <option value="date-asc">Oldest First</option>
+            <option value="company">Company A-Z</option>
+            <option value="status">Status</option>
+        </select>
+    </div>
+
+    <div style="overflow-x: auto;">
+    <table id="applications-table">
+        <thead>
+            <tr>
+                <th style="width: 30px;"></th>
+                <th>Company</th>
+                <th>Position</th>
+                <th>Location</th>
+                <th>Status</th>
+                <th>Match</th>
+                <th>Applied</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for app in applications %}
+            <tr class="tracking-row" data-id="{{ app.id }}" data-status="{{ app.status.value }}" data-company="{{ app.job_description.company_name if app.job_description else '' }}" data-date="{{ app.created_at.isoformat() if app.created_at else '' }}">
+                <td><span class="expand-icon">▶</span></td>
+                <td>{{ app.job_description.company_name if app.job_description else 'Unknown' }}</td>
+                <td>{{ app.job_description.job_title if app.job_description else 'Unknown' }}</td>
+                <td>{{ app.job_description.location or '-' if app.job_description else '-' }}</td>
+                <td>
+                    {% if app.status.value == 'submitted' %}
+                    <span class="badge status-badge-submitted">Submitted</span>
+                    {% elif app.status.value == 'form_filled' %}
+                    <span class="badge status-badge-form-filled">Form Filled</span>
+                    {% elif app.status.value == 'pdf_generated' %}
+                    <span class="badge badge-success">Ready</span>
+                    {% elif app.status.value == 'manual_required' %}
+                    <span class="badge status-badge-manual">Manual Required</span>
+                    {% elif app.status.value == 'failed' %}
+                    <span class="badge status-badge-failed">Failed</span>
+                    {% else %}
+                    <span class="badge badge-warning">{{ app.status.value }}</span>
+                    {% endif %}
+                    {% if app.email_sent %}
+                    <span class="email-badge">Email Sent</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if app.tailored_resume %}
+                    {{ "%.0f"|format(app.tailored_resume.match_score) }}%
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if app.applied_at %}
+                    {{ app.applied_at.strftime('%m/%d %H:%M') }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td>
+                    {% if app.output_dir %}
+                    <a href="/download/{{ app.output_dir }}/{{ app.resume_filename or 'resume.pdf' }}" class="btn btn-sm btn-secondary">Resume</a>
+                    {% endif %}
+                    {% if app.status.value == 'pdf_generated' %}
+                    <button class="btn btn-sm btn-primary apply-btn" data-id="{{ app.id }}">Apply</button>
+                    {% endif %}
+                    <button class="btn btn-sm btn-danger delete-btn" data-id="{{ app.id }}" title="Delete">✕</button>
+                </td>
+            </tr>
+            <tr class="tracking-details-row" data-id="{{ app.id }}">
+                <td colspan="8">
+                    <div class="tracking-details">
+                        <div class="tracking-grid">
+                            <div>
+                                <!-- Application Info -->
+                                <div class="tracking-section">
+                                    <h4>Application Details</h4>
+                                    <div style="font-size: 13px; color: #374151;">
+                                        {% if app.job_description %}
+                                        <p><strong>Company:</strong> {{ app.job_description.company_name }}</p>
+                                        <p><strong>Position:</strong> {{ app.job_description.job_title }}</p>
+                                        {% if app.job_description.salary_range %}
+                                        <p><strong>Salary:</strong> {{ app.job_description.salary_range }}</p>
+                                        {% endif %}
+                                        {% if app.job_description.remote_type %}
+                                        <p><strong>Work Type:</strong> {{ app.job_description.remote_type }}</p>
+                                        {% endif %}
+                                        {% if app.job_description.seniority_level %}
+                                        <p><strong>Level:</strong> {{ app.job_description.seniority_level }}</p>
+                                        {% endif %}
+                                        {% endif %}
+                                        {% if app.job_viability %}
+                                        <p style="margin-top: 12px;">
+                                            <strong>Viability:</strong>
+                                            <span class="badge {% if app.job_viability.overall_recommendation == 'Good match' %}badge-success{% elif app.job_viability.overall_recommendation == 'Apply with caution' %}badge-warning{% else %}badge-error{% endif %}">
+                                                {{ app.job_viability.overall_recommendation }}
+                                            </span>
+                                            ({{ "%.0f"|format(app.job_viability.match_score) }}%)
+                                        </p>
+                                        {% if app.job_viability.viability_notes %}
+                                        <ul style="margin-top: 8px; padding-left: 20px; color: #6b7280; font-size: 12px;">
+                                            {% for note in app.job_viability.viability_notes %}
+                                            <li>{{ note }}</li>
+                                            {% endfor %}
+                                        </ul>
+                                        {% endif %}
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <!-- Timeline -->
+                                <div class="tracking-section">
+                                    <h4>Timeline</h4>
+                                    <div class="timeline">
+                                        <div class="timeline-item completed">
+                                            <div>Created</div>
+                                            <div class="timeline-date">{{ app.created_at.strftime('%Y-%m-%d %H:%M') if app.created_at else 'Unknown' }}</div>
+                                        </div>
+                                        {% if app.status.value in ['jd_fetched', 'resume_generated', 'pdf_generated', 'form_opened', 'form_filled', 'submitted', 'manual_required'] %}
+                                        <div class="timeline-item completed">
+                                            <div>Documents Generated</div>
+                                            <div class="timeline-date">{{ app.created_at.strftime('%Y-%m-%d %H:%M') if app.created_at else '' }}</div>
+                                        </div>
+                                        {% endif %}
+                                        {% if app.status.value in ['form_opened', 'form_filled', 'submitted'] %}
+                                        <div class="timeline-item completed">
+                                            <div>Form Opened</div>
+                                        </div>
+                                        {% endif %}
+                                        {% if app.status.value in ['form_filled', 'submitted'] %}
+                                        <div class="timeline-item completed">
+                                            <div>Form Filled</div>
+                                        </div>
+                                        {% endif %}
+                                        {% if app.status.value == 'submitted' %}
+                                        <div class="timeline-item completed">
+                                            <div>Submitted</div>
+                                            <div class="timeline-date">{{ app.applied_at.strftime('%Y-%m-%d %H:%M') if app.applied_at else '' }}</div>
+                                        </div>
+                                        {% endif %}
+                                        {% if app.email_sent %}
+                                        <div class="timeline-item completed">
+                                            <div>Email Sent</div>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <!-- Next Steps -->
+                                <div class="tracking-section">
+                                    <h4>AI Next Steps</h4>
+                                    <div id="next-steps-{{ app.id }}">
+                                        {% if app.next_steps %}
+                                        <ul class="next-steps-list">
+                                            {% for step in app.next_steps %}
+                                            <li class="next-step-item">
+                                                <input type="checkbox" class="next-step-checkbox">
+                                                <span>{{ step }}</span>
+                                            </li>
+                                            {% endfor %}
+                                        </ul>
+                                        {% else %}
+                                        <button class="btn btn-sm btn-secondary generate-steps-btn" data-id="{{ app.id }}">Generate Next Steps</button>
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <!-- Notes -->
+                                <div class="tracking-section">
+                                    <h4>Notes</h4>
+                                    <textarea class="notes-field" data-id="{{ app.id }}" placeholder="Add notes about this application...">{{ app.notes or '' }}</textarea>
+                                    <button class="btn btn-sm btn-secondary save-notes-btn" data-id="{{ app.id }}" style="margin-top: 8px;">Save Notes</button>
+                                </div>
+
+                                <!-- Status Update -->
+                                <div class="tracking-section">
+                                    <h4>Update Status</h4>
+                                    <div style="display: flex; gap: 12px; align-items: center;">
+                                        <select class="status-dropdown" data-id="{{ app.id }}">
+                                            <option value="pdf_generated" {% if app.status.value == 'pdf_generated' %}selected{% endif %}>Ready to Apply</option>
+                                            <option value="form_filled" {% if app.status.value == 'form_filled' %}selected{% endif %}>Form Filled</option>
+                                            <option value="submitted" {% if app.status.value == 'submitted' %}selected{% endif %}>Submitted</option>
+                                            <option value="manual_required" {% if app.status.value == 'manual_required' %}selected{% endif %}>Manual Required</option>
+                                        </select>
+                                        <button class="btn btn-sm btn-secondary update-status-btn" data-id="{{ app.id }}">Update</button>
+                                    </div>
+                                </div>
+
+                                <!-- Follow-up Date -->
+                                <div class="tracking-section">
+                                    <h4>Follow-up Date</h4>
+                                    <div style="display: flex; gap: 12px; align-items: center;">
+                                        <input type="date" class="followup-date" data-id="{{ app.id }}" value="{{ app.follow_up_date or '' }}">
+                                        <button class="btn btn-sm btn-secondary save-followup-btn" data-id="{{ app.id }}">Set</button>
+                                    </div>
+                                </div>
+
+                                <!-- Email -->
+                                <div class="tracking-section">
+                                    <h4>Email Notification</h4>
+                                    {% if app.email_sent %}
+                                    <span class="badge badge-success">Email Sent</span>
+                                    {% else %}
+                                    <button class="btn btn-sm btn-secondary send-email-btn" data-id="{{ app.id }}">Send Email Receipt</button>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+            {% if app.error_message %}
+            <tr>
+                <td colspan="8" style="color: var(--error); font-size: 12px; padding-top: 0;">
+                    Error: {{ app.error_message }}
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No applications submitted yet.</p>
+        <p style="margin-top: 8px;"><a href="{{ url_for('index') }}">Submit your first application</a></p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+document.addEventListener('DOMContentLoaded', function() {
+    const clearBtn = document.getElementById('clear-history');
+    const expandAllBtn = document.getElementById('expand-all');
+    const collapseAllBtn = document.getElementById('collapse-all');
+    const filterStatus = document.getElementById('filter-status');
+    const sortBy = document.getElementById('sort-by');
+
+    // Clear history
+    if (clearBtn) {
+        clearBtn.addEventListener('click', async function() {
+            if (!confirm('Clear all application history?')) return;
+
+            try {
+                const response = await fetch('/api/clear-history', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    location.reload();
+                }
+            } catch (err) {
+                alert('Failed to clear history');
+            }
+        });
+    }
+
+    // Expand/Collapse rows
+    document.querySelectorAll('.tracking-row').forEach(row => {
+        row.addEventListener('click', function(e) {
+            if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
+
+            const id = this.dataset.id;
+            const detailsRow = document.querySelector(`.tracking-details-row[data-id="${id}"]`);
+            const details = detailsRow.querySelector('.tracking-details');
+            const icon = this.querySelector('.expand-icon');
+
+            if (details.classList.contains('active')) {
+                details.classList.remove('active');
+                this.classList.remove('expanded');
+                icon.textContent = '▶';
+            } else {
+                details.classList.add('active');
+                this.classList.add('expanded');
+                icon.textContent = '▼';
+            }
+        });
+    });
+
+    // Expand all
+    if (expandAllBtn) {
+        expandAllBtn.addEventListener('click', function() {
+            document.querySelectorAll('.tracking-details').forEach(d => d.classList.add('active'));
+            document.querySelectorAll('.tracking-row').forEach(r => r.classList.add('expanded'));
+            document.querySelectorAll('.expand-icon').forEach(i => i.textContent = '▼');
+        });
+    }
+
+    // Collapse all
+    if (collapseAllBtn) {
+        collapseAllBtn.addEventListener('click', function() {
+            document.querySelectorAll('.tracking-details').forEach(d => d.classList.remove('active'));
+            document.querySelectorAll('.tracking-row').forEach(r => r.classList.remove('expanded'));
+            document.querySelectorAll('.expand-icon').forEach(i => i.textContent = '▶');
+        });
+    }
+
+    // Filter by status
+    if (filterStatus) {
+        filterStatus.addEventListener('change', function() {
+            const status = this.value;
+            document.querySelectorAll('.tracking-row').forEach(row => {
+                const detailsRow = document.querySelector(`.tracking-details-row[data-id="${row.dataset.id}"]`);
+                if (!status || row.dataset.status === status) {
+                    row.style.display = '';
+                    if (detailsRow) detailsRow.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                    if (detailsRow) detailsRow.style.display = 'none';
+                }
+            });
+        });
+    }
+
+    // Apply button
+    document.querySelectorAll('.apply-btn').forEach(btn => {
+        btn.addEventListener('click', async function(e) {
+            e.stopPropagation();
+            const appId = this.dataset.id;
+            this.disabled = true;
+            this.textContent = 'Applying...';
+
+            try {
+                const response = await fetch(`/api/apply/${appId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ headless: false, auto_submit: true })
+                });
+
+                // Check if response is JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('Server returned non-JSON response');
+                }
+
+                const data = await response.json();
+
+                if (data.success) {
+                    this.textContent = data.status === 'submitted' ? 'Submitted' : 'Form Filled';
+                    this.classList.remove('btn-primary');
+                    this.classList.add(data.status === 'submitted' ? 'btn-success' : 'btn-warning');
+                    if (data.message) alert(data.message);
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    this.textContent = 'Failed';
+                    this.classList.remove('btn-primary');
+                    this.classList.add('btn-danger');
+                    alert(data.error || 'Auto-apply failed');
+                }
+            } catch (err) {
+                this.textContent = 'Error';
+                this.classList.remove('btn-primary');
+                this.classList.add('btn-danger');
+                alert('Failed to auto-apply: ' + err.message);
+            }
+        });
+    });
+
+    // Generate next steps
+    document.querySelectorAll('.generate-steps-btn').forEach(btn => {
+        btn.addEventListener('click', async function(e) {
+            e.stopPropagation();
+            const appId = this.dataset.id;
+            this.disabled = true;
+            this.textContent = 'Generating...';
+
+            try {
+                const response = await fetch(`/api/application/${appId}/next-steps`);
+                const data = await response.json();
+
+                if (data.success && data.next_steps) {
+                    const container = document.getElementById(`next-steps-${appId}`);
+                    let html = '<ul class="next-steps-list">';
+                    data.next_steps.forEach(step => {
+                        html += `<li class="next-step-item">
+                            <input type="checkbox" class="next-step-checkbox">
+                            <span>${step}</span>
+                        </li>`;
+                    });
+                    html += '</ul>';
+                    container.innerHTML = html;
+                } else {
+                    this.textContent = 'Generate Next Steps';
+                    this.disabled = false;
+                    alert(data.error || 'Failed to generate next steps');
+                }
+            } catch (err) {
+                this.textContent = 'Generate Next Steps';
+                this.disabled = false;
+                alert('Failed to generate next steps: ' + err.message);
+            }
+        });
+    });
+
+    // Save notes
+    document.querySelectorAll('.save-notes-btn').forEach(btn => {
+        btn.addEventListener('click', async function(e) {
+            e.stopPropagation();
+            const appId = this.dataset.id;
+            const notes = document.querySelector(`.notes-field[data-id="${appId}"]`).value;
+
+            try {
+                const response = await fetch(`/api/application/${appId}/notes`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notes })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.textContent = 'Saved!';
+                    setTimeout(() => this.textContent = 'Save Notes', 2000);
+                }
+            } catch (err) {
+                alert('Failed to save notes');
+            }
+        });
+    });
+
+    // Update status
+    document.querySelectorAll('.update-status-btn').forEach(btn => {
+        btn.addEventListener('click', async function(e) {
+            e.stopPropagation();
+            const appId = this.dataset.id;
+            const status = document.querySelector(`.status-dropdown[data-id="${appId}"]`).value;
+
+            try {
+                const response = await fetch(`/api/application/${appId}/status`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    location.reload();
+                }
+            } catch (err) {
+                alert('Failed to update status');
+            }
+        });
+    });
+
+    // Set follow-up date
+    document.querySelectorAll('.save-followup-btn').forEach(btn => {
+        btn.addEventListener('click', async function(e) {
+            e.stopPropagation();
+            const appId = this.dataset.id;
+            const date = document.querySelector(`.followup-date[data-id="${appId}"]`).value;
+
+            try {
+                const response = await fetch(`/api/application/${appId}/follow-up`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ follow_up_date: date })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.textContent = 'Set!';
+                    setTimeout(() => this.textContent = 'Set', 2000);
+                }
+            } catch (err) {
+                alert('Failed to set follow-up date');
+            }
+        });
+    });
+
+    // Send email
+    document.querySelectorAll('.send-email-btn').forEach(btn => {
+        btn.addEventListener('click', async function(e) {
+            e.stopPropagation();
+            const appId = this.dataset.id;
+            this.disabled = true;
+            this.textContent = 'Sending...';
+
+            try {
+                const response = await fetch(`/api/email/${appId}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.textContent = 'Sent!';
+                    this.classList.remove('btn-secondary');
+                    this.classList.add('btn-success');
+                } else {
+                    this.textContent = 'Send Email Receipt';
+                    this.disabled = false;
+                    alert(data.error || 'Failed to send email');
+                }
+            } catch (err) {
+                this.textContent = 'Send Email Receipt';
+                this.disabled = false;
+                alert('Failed to send email: ' + err.message);
+            }
+        });
+    });
+
+    // Stop propagation on inputs
+    document.querySelectorAll('.notes-field, .status-dropdown, .followup-date').forEach(el => {
+        el.addEventListener('click', e => e.stopPropagation());
+    });
+
+    // Delete individual application
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.addEventListener('click', async function(e) {
+            e.stopPropagation();
+            const appId = this.dataset.id;
+            const row = this.closest('.tracking-row');
+            const company = row.querySelector('td:nth-child(2)').textContent.trim();
+
+            if (!confirm(`Delete application for ${company}?`)) return;
+
+            try {
+                const response = await fetch(`/api/application/${appId}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    // Remove both the main row and details row
+                    const detailsRow = document.querySelector(`.tracking-details-row[data-id="${appId}"]`);
+                    row.remove();
+                    if (detailsRow) detailsRow.remove();
+                } else {
+                    alert(data.error || 'Failed to delete application');
+                }
+            } catch (err) {
+                alert('Failed to delete application: ' + err.message);
+            }
+        });
+    });
+});
+{% endblock %}

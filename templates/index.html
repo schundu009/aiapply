@@ -1,0 +1,673 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Job Applications</h2>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">Total</div>
+        <div class="stat-value">{{ stats.total }}</div>
+    </div>
+    <div class="stat-card info">
+        <div class="stat-label">Docs Ready</div>
+        <div class="stat-value">{{ stats.docs_ready }}</div>
+    </div>
+    <div class="stat-card success">
+        <div class="stat-label">Applied</div>
+        <div class="stat-value">{{ stats.applied }}</div>
+    </div>
+    <div class="stat-card error">
+        <div class="stat-label">Failed</div>
+        <div class="stat-value">{{ stats.failed }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h3>Submit Jobs</h3>
+    </div>
+
+    <div class="toggle-group">
+        <input type="radio" name="input_mode" id="mode_single" value="single" checked>
+        <label for="mode_single">Single URL</label>
+        <input type="radio" name="input_mode" id="mode_batch" value="batch">
+        <label for="mode_batch">Batch URLs</label>
+    </div>
+
+    <form id="job-form">
+        <div id="single-input" class="form-group">
+            <label for="job_url">Job URL</label>
+            <input type="url" id="job_url" name="job_url" placeholder="https://job-boards.greenhouse.io/company/jobs/12345">
+        </div>
+
+        <div id="batch-input" class="form-group" style="display: none;">
+            <label for="job_urls">Job URLs (one per line)</label>
+            <textarea id="job_urls" name="job_urls" rows="6" placeholder="https://job-boards.greenhouse.io/company/jobs/12345&#10;https://boards.greenhouse.io/company/jobs/67890"></textarea>
+            <span class="helper-text">Enter each job URL on a separate line. Lines starting with # are ignored.</span>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="submit-btn">Create CV/CL</button>
+    </form>
+
+    <div id="process-progress" class="process-progress-inline" style="display: none;">
+        <div class="progress-inline-bar">
+            <div class="progress-inline-fill" id="progress-bar"></div>
+            <span class="progress-inline-text" id="progress-status">Starting...</span>
+        </div>
+        <div class="progress-inline-stages" id="progress-stages">
+            <span class="stage" data-step="fetch">Fetch</span>
+            <span class="stage" data-step="metadata">Metadata</span>
+            <span class="stage" data-step="viability">Viability</span>
+            <span class="stage" data-step="resume">Resume</span>
+            <span class="stage" data-step="cover">Cover Letter</span>
+            <span class="stage" data-step="pdf">PDF</span>
+        </div>
+        <div class="progress-message" id="progress-message"></div>
+    </div>
+</div>
+
+<div id="results"></div>
+{% endblock %}
+
+{% block scripts %}
+document.addEventListener('DOMContentLoaded', function() {
+    const modeRadios = document.querySelectorAll('input[name="input_mode"]');
+    const singleInput = document.getElementById('single-input');
+    const batchInput = document.getElementById('batch-input');
+    const form = document.getElementById('job-form');
+    const submitBtn = document.getElementById('submit-btn');
+    const loadingIndicator = document.getElementById('loading-indicator');
+    const resultsDiv = document.getElementById('results');
+
+    // Check for URL query parameter and auto-fill
+    const urlParams = new URLSearchParams(window.location.search);
+    const jobUrl = urlParams.get('url');
+    if (jobUrl) {
+        document.getElementById('job_url').value = decodeURIComponent(jobUrl);
+        // Optional: auto-submit after a short delay
+        const autoSubmit = urlParams.get('auto');
+        if (autoSubmit === '1' || autoSubmit === 'true') {
+            setTimeout(() => form.dispatchEvent(new Event('submit')), 500);
+        }
+    }
+
+    modeRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            if (this.value === 'single') {
+                singleInput.style.display = 'block';
+                batchInput.style.display = 'none';
+            } else {
+                singleInput.style.display = 'none';
+                batchInput.style.display = 'block';
+            }
+        });
+    });
+
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const mode = document.querySelector('input[name="input_mode"]:checked').value;
+        let urls = [];
+
+        if (mode === 'single') {
+            const url = document.getElementById('job_url').value.trim();
+            if (url) urls.push(url);
+        } else {
+            const text = document.getElementById('job_urls').value;
+            urls = text.split('\n')
+                .map(u => u.trim())
+                .filter(u => u && !u.startsWith('#'));
+        }
+
+        if (urls.length === 0) {
+            alert('Please enter at least one job URL');
+            return;
+        }
+
+        submitBtn.disabled = true;
+        resultsDiv.innerHTML = '';
+
+        // Show progress panel
+        const progressPanel = document.getElementById('process-progress');
+        const progressStatus = document.getElementById('progress-status');
+        const progressBar = document.getElementById('progress-bar');
+        const progressMessage = document.getElementById('progress-message');
+        const stages = document.querySelectorAll('#progress-stages .stage');
+
+        progressPanel.style.display = 'block';
+        progressBar.style.width = '0%';
+        progressMessage.innerHTML = '';
+
+        // Reset all stages
+        stages.forEach(stage => {
+            stage.classList.remove('active', 'completed', 'error');
+        });
+
+        const updateStep = (stepName, status) => {
+            const stage = document.querySelector(`#progress-stages [data-step="${stepName}"]`);
+            if (!stage) return;
+
+            stages.forEach(s => s.classList.remove('active'));
+
+            if (status === 'active') {
+                stage.classList.add('active');
+            } else if (status === 'completed') {
+                stage.classList.remove('active');
+                stage.classList.add('completed');
+            } else if (status === 'error') {
+                stage.classList.remove('active');
+                stage.classList.add('error');
+            }
+        };
+
+        const setProgress = (percent, statusText) => {
+            progressBar.style.width = percent + '%';
+            progressStatus.textContent = statusText;
+        };
+
+        try {
+            // Step 1: Fetching
+            setProgress(5, 'Fetching job posting...');
+            updateStep('fetch', 'active');
+
+            const response = await fetch('/api/process', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ urls: urls })
+            });
+
+            // Simulate progress stages (since backend doesn't stream)
+            updateStep('fetch', 'completed');
+            setProgress(20, 'Extracting metadata...');
+            updateStep('metadata', 'active');
+            await new Promise(r => setTimeout(r, 300));
+
+            updateStep('metadata', 'completed');
+            setProgress(35, 'Assessing viability...');
+            updateStep('viability', 'active');
+            await new Promise(r => setTimeout(r, 300));
+
+            updateStep('viability', 'completed');
+            setProgress(50, 'Generating resume...');
+            updateStep('resume', 'active');
+            await new Promise(r => setTimeout(r, 300));
+
+            updateStep('resume', 'completed');
+            setProgress(70, 'Generating cover letter...');
+            updateStep('cover', 'active');
+            await new Promise(r => setTimeout(r, 300));
+
+            updateStep('cover', 'completed');
+            setProgress(85, 'Creating PDFs...');
+            updateStep('pdf', 'active');
+
+            const data = await response.json();
+
+            if (data.error) {
+                updateStep('pdf', 'error');
+                setProgress(100, 'Failed');
+                progressMessage.innerHTML = `<div class="alert alert-error">${data.error}</div>`;
+                resultsDiv.innerHTML = `<div class="alert alert-error">${data.error}</div>`;
+            } else {
+                updateStep('pdf', 'completed');
+                setProgress(100, 'Complete!');
+
+                // Show success summary
+                if (data.results && data.results[0]) {
+                    const r = data.results[0];
+                    let summary = '';
+                    if (r.company && r.title) {
+                        summary = `<strong>${r.company}</strong> - ${r.title}`;
+                        if (r.match_score) summary += ` | Match: ${Math.round(r.match_score)}%`;
+                    }
+                    if (summary) {
+                        progressMessage.innerHTML = `<div class="progress-summary">${summary}</div>`;
+                    }
+                }
+                let html = '<div class="card"><div class="card-header"><h3>Results</h3></div>';
+
+                data.results.forEach(result => {
+                    const isSuccess = result.status === 'pdf_generated';
+
+                    // Viability badge color
+                    let viabClass = 'badge-info';
+                    if (result.viability_recommendation === 'Good match') viabClass = 'badge-success';
+                    else if (result.viability_recommendation === 'Apply with caution') viabClass = 'badge-warning';
+                    else if (result.viability_recommendation === 'Not recommended') viabClass = 'badge-error';
+
+                    html += `
+                        <div class="result-item ${isSuccess ? 'success' : 'error'}">
+                            <div class="result-header">
+                                <span class="result-title">${result.company || 'Unknown'} - ${result.title || 'Unknown'}</span>
+                                <span class="badge ${isSuccess ? 'badge-success' : 'badge-error'}">${isSuccess ? 'Complete' : 'Failed'}</span>
+                            </div>
+                            ${isSuccess ? `
+                                <div class="result-meta">
+                                    ${result.location ? `<span class="meta-item"><strong>Location:</strong> ${result.location}</span>` : ''}
+                                    ${result.salary ? `<span class="meta-item"><strong>Salary:</strong> ${result.salary}</span>` : ''}
+                                    ${result.job_type ? `<span class="meta-item"><strong>Type:</strong> ${result.job_type}</span>` : ''}
+                                    ${result.remote_type ? `<span class="meta-item"><strong>Remote:</strong> ${result.remote_type}</span>` : ''}
+                                    ${result.seniority ? `<span class="meta-item"><strong>Level:</strong> ${result.seniority}</span>` : ''}
+                                    ${result.experience_required ? `<span class="meta-item"><strong>Experience:</strong> ${result.experience_required}</span>` : ''}
+                                    ${result.posting_date ? `<span class="meta-item"><strong>Posted:</strong> ${result.posting_date}</span>` : ''}
+                                </div>
+                                ${result.technologies && result.technologies.length > 0 ? `
+                                    <div style="margin: 8px 0; font-size: 13px; line-height: 1.6;">
+                                        <strong style="color: #555;">Tech:</strong>
+                                        <span style="color: #333;">${result.technologies.join(', ')}</span>
+                                    </div>
+                                ` : ''}
+                                ${result.required_skills && result.required_skills.length > 0 ? `
+                                    <div style="margin: 8px 0; font-size: 13px; line-height: 1.6;">
+                                        <strong style="color: #555;">Skills:</strong>
+                                        <span style="color: #333;">${result.required_skills.join(', ')}</span>
+                                    </div>
+                                ` : ''}
+                                ${result.freshness_warning ? `<div class="alert alert-warning" style="margin: 8px 0; padding: 8px 12px; font-size: 13px;">${result.freshness_warning}</div>` : ''}
+                                <div style="margin: 10px 0; font-size: 14px;">
+                                    Match: <strong>${Math.round(result.match_score)}%</strong>
+                                    ${result.viability_recommendation ? ` <span class="badge ${viabClass}">${result.viability_recommendation}</span>` : ''}
+                                </div>
+                                ${result.viability_notes && result.viability_notes.length > 0 ? `
+                                    <ul class="viability-notes">
+                                        ${result.viability_notes.map(n => `<li>${n}</li>`).join('')}
+                                    </ul>
+                                ` : ''}
+                                <div class="doc-preview-container" data-id="${result.id}">
+                                    <div class="doc-tabs">
+                                        <button class="doc-tab active" data-tab="resume-${result.id}">Resume</button>
+                                        <button class="doc-tab" data-tab="cover-${result.id}">Cover Letter</button>
+                                    </div>
+                                    <div class="doc-preview" id="resume-${result.id}">
+                                        <pre class="doc-text">${result.resume_text || 'No resume text available'}</pre>
+                                    </div>
+                                    <div class="doc-preview" id="cover-${result.id}" style="display: none;">
+                                        <pre class="doc-text">${result.cover_letter_text || 'No cover letter text available'}</pre>
+                                    </div>
+                                    <div class="doc-actions">
+                                        <button class="btn btn-sm btn-secondary copy-btn" data-target="resume-${result.id}">Copy</button>
+                                    </div>
+                                </div>
+                                <div class="result-actions">
+                                    <a href="/download/${result.output_dir}/${result.resume_file}" class="btn btn-sm btn-secondary">Resume</a>
+                                    <a href="/download/${result.output_dir}/${result.cover_file}" class="btn btn-sm btn-secondary">Cover</a>
+                                    <button class="btn btn-sm btn-primary auto-apply-btn" data-id="${result.id}">Apply</button>
+                                </div>
+                            ` : `<div class="helper-text" style="color: var(--error);">${result.error || 'Unknown error occurred'}</div>`}
+                        </div>
+                    `;
+                });
+
+                html += '</div>';
+                resultsDiv.innerHTML = html;
+            }
+        } catch (err) {
+            // Mark current active stage as error
+            const activeStage = document.querySelector('#progress-stages .stage.active');
+            if (activeStage) {
+                activeStage.classList.remove('active');
+                activeStage.classList.add('error');
+            }
+            setProgress(100, 'Error: ' + err.message);
+            progressMessage.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+            resultsDiv.innerHTML = `<div class="alert alert-error">Error: ${err.message}</div>`;
+        } finally {
+            submitBtn.disabled = false;
+        }
+
+        // Add event listeners for doc tabs
+        setupDocTabs();
+        setupCopyButtons();
+        setupAutoApplyButtons();
+    });
+
+    function setupDocTabs() {
+        document.querySelectorAll('.doc-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                const targetId = this.dataset.tab;
+                const container = this.closest('.doc-preview-container');
+
+                // Update active tab
+                container.querySelectorAll('.doc-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+
+                // Show target panel
+                container.querySelectorAll('.doc-preview').forEach(p => p.style.display = 'none');
+                document.getElementById(targetId).style.display = 'block';
+            });
+        });
+    }
+
+    function setupCopyButtons() {
+        document.querySelectorAll('.copy-btn').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const targetId = this.dataset.target;
+                const textEl = document.getElementById(targetId).querySelector('.doc-text');
+                const text = textEl.textContent;
+
+                try {
+                    await navigator.clipboard.writeText(text);
+                    const originalText = this.textContent;
+                    this.textContent = 'Copied!';
+                    setTimeout(() => this.textContent = originalText, 2000);
+                } catch (err) {
+                    alert('Failed to copy to clipboard');
+                }
+            });
+        });
+    }
+
+    function setupAutoApplyButtons() {
+        document.querySelectorAll('.auto-apply-btn').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const appId = this.dataset.id;
+                const resultItem = this.closest('.result-item');
+                const button = this;
+
+                // Create progress panel
+                let progressPanel = resultItem.querySelector('.apply-progress');
+                if (!progressPanel) {
+                    progressPanel = document.createElement('div');
+                    progressPanel.className = 'apply-progress';
+                    progressPanel.innerHTML = `
+                        <div class="progress-header">
+                            <span class="progress-title">Auto Apply Progress</span>
+                            <span class="progress-status">Starting...</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar-fill"></div>
+                        </div>
+                        <div class="progress-steps">
+                            <div class="progress-step" data-step="browser">
+                                <span class="step-icon">&#9675;</span>
+                                <span class="step-text">Browser</span>
+                            </div>
+                            <div class="progress-step" data-step="navigate">
+                                <span class="step-icon">&#9675;</span>
+                                <span class="step-text">Navigate</span>
+                            </div>
+                            <div class="progress-step" data-step="apply">
+                                <span class="step-icon">&#9675;</span>
+                                <span class="step-text">Apply</span>
+                            </div>
+                            <div class="progress-step" data-step="modal">
+                                <span class="step-icon">&#9675;</span>
+                                <span class="step-text">Options</span>
+                            </div>
+                            <div class="progress-step" data-step="login">
+                                <span class="step-icon">&#9675;</span>
+                                <span class="step-text">Login</span>
+                            </div>
+                            <div class="progress-step" data-step="form">
+                                <span class="step-icon">&#9675;</span>
+                                <span class="step-text">Form Steps</span>
+                            </div>
+                            <div class="progress-step" data-step="fill">
+                                <span class="step-icon">&#9675;</span>
+                                <span class="step-text">Fill</span>
+                            </div>
+                            <div class="progress-step" data-step="upload">
+                                <span class="step-icon">&#9675;</span>
+                                <span class="step-text">Upload</span>
+                            </div>
+                            <div class="progress-step" data-step="submit">
+                                <span class="step-icon">&#9675;</span>
+                                <span class="step-text">Submit</span>
+                            </div>
+                        </div>
+                        <div class="progress-logs"></div>
+                        <div class="progress-message"></div>
+                    `;
+                    this.parentElement.after(progressPanel);
+                }
+
+                progressPanel.style.display = 'block';
+                const statusEl = progressPanel.querySelector('.progress-status');
+                const messageEl = progressPanel.querySelector('.progress-message');
+                const logsEl = progressPanel.querySelector('.progress-logs');
+                const progressBarFill = progressPanel.querySelector('.progress-bar-fill');
+                const steps = progressPanel.querySelectorAll('.progress-step');
+
+                // Stage to progress percentage mapping
+                const stageProgress = {
+                    'browser': 10,
+                    'navigate': 20,
+                    'apply': 30,
+                    'modal': 40,
+                    'login': 50,
+                    'form': 60,
+                    'fill': 75,
+                    'upload': 85,
+                    'submit': 100
+                };
+
+                // Stage name mapping (backend stage -> UI data-step)
+                const stageMap = {
+                    'browser': 'browser',
+                    'navigate': 'navigate',
+                    'apply': 'apply',
+                    'modal': 'modal',
+                    'login': 'login',
+                    'form': 'form',
+                    'fill': 'fill',
+                    'upload': 'upload',
+                    'submit': 'submit'
+                };
+
+                // Reset steps
+                steps.forEach(step => {
+                    step.classList.remove('active', 'completed', 'error', 'skipped');
+                    step.querySelector('.step-icon').innerHTML = '&#9675;';
+                });
+                messageEl.innerHTML = '';
+                logsEl.innerHTML = '';
+                progressBarFill.style.width = '0%';
+
+                button.disabled = true;
+                button.textContent = 'Applying...';
+
+                // Helper to update step visuals
+                const updateStep = (stepName, status) => {
+                    const step = progressPanel.querySelector(`[data-step="${stepName}"]`);
+                    if (!step) return;
+
+                    if (status === 'active') {
+                        steps.forEach(s => s.classList.remove('active'));
+                        step.classList.add('active');
+                        step.querySelector('.step-icon').innerHTML = '<span class="spinner"></span>';
+                    } else if (status === 'completed') {
+                        step.classList.remove('active');
+                        step.classList.add('completed');
+                        step.querySelector('.step-icon').innerHTML = '&#10003;';
+                    } else if (status === 'error') {
+                        step.classList.remove('active');
+                        step.classList.add('error');
+                        step.querySelector('.step-icon').innerHTML = '&#10007;';
+                    } else if (status === 'skipped') {
+                        step.classList.remove('active');
+                        step.classList.add('skipped');
+                        step.querySelector('.step-icon').innerHTML = '&#8212;';
+                    }
+                };
+
+                // Helper to update progress from stage data
+                const updateFromStages = (stages) => {
+                    let maxProgress = 0;
+                    for (const [stage, info] of Object.entries(stages)) {
+                        const uiStage = stageMap[stage];
+                        if (uiStage && info.status) {
+                            updateStep(uiStage, info.status);
+                            if (info.status === 'active' || info.status === 'completed') {
+                                const prog = stageProgress[stage] || 0;
+                                if (prog > maxProgress) maxProgress = prog;
+                            }
+                        }
+                    }
+                    progressBarFill.style.width = maxProgress + '%';
+                };
+
+                // Helper to add log entries
+                const addLog = (message) => {
+                    const logEntry = document.createElement('div');
+                    logEntry.className = 'log-entry';
+                    logEntry.textContent = message;
+                    logsEl.appendChild(logEntry);
+                    logsEl.scrollTop = logsEl.scrollHeight;
+                };
+
+                // Helper to handle final result
+                const handleFinalResult = (data) => {
+                    button.disabled = false;
+
+                    if (data.captcha_detected) {
+                        updateStep('captcha', 'error');
+                        statusEl.textContent = 'CAPTCHA Detected';
+                        messageEl.innerHTML = '<div class="alert alert-warning">CAPTCHA detected. Please solve manually.</div>';
+                    }
+
+                    if (data.status === 'submitted') {
+                        updateStep('submit', 'completed');
+                        progressBarFill.style.width = '100%';
+                        statusEl.textContent = 'Submitted!';
+                        messageEl.innerHTML = '<div class="alert alert-success">Application submitted successfully!</div>';
+                        button.textContent = 'Submitted';
+                        button.classList.remove('btn-primary');
+                        button.classList.add('btn-success');
+                    } else if (data.status === 'form_filled') {
+                        statusEl.textContent = 'Form Filled';
+                        messageEl.innerHTML = '<div class="alert alert-warning">Form filled. Review and submit manually.</div>';
+                        button.textContent = 'Form Filled';
+                        button.classList.remove('btn-primary');
+                        button.classList.add('btn-warning');
+                    } else if (data.status === 'manual_required' || data.status === 'fill_failed') {
+                        statusEl.textContent = 'Manual Required';
+                        messageEl.innerHTML = `<div class="alert alert-warning">${data.message || 'Could not auto-fill.'}</div>`;
+                        button.textContent = 'Manual';
+                        button.classList.remove('btn-primary');
+                        button.classList.add('btn-warning');
+                    } else if (data.status === 'missing_fields') {
+                        statusEl.textContent = 'Missing Fields';
+                        let fieldsHtml = '<ul style="margin: 4px 0; padding-left: 20px; font-size: 11px;">';
+                        (data.missing_fields || []).forEach(f => {
+                            fieldsHtml += `<li>${f.label || f.maps_to}</li>`;
+                        });
+                        fieldsHtml += '</ul>';
+                        messageEl.innerHTML = `<div class="alert alert-warning">Missing required fields:${fieldsHtml}</div>`;
+                        button.textContent = 'Missing Info';
+                        button.classList.remove('btn-primary');
+                        button.classList.add('btn-warning');
+                    } else if (data.status === 'error' || data.error) {
+                        statusEl.textContent = 'Failed';
+                        messageEl.innerHTML = `<div class="alert alert-error">${data.message || data.error || 'Auto-apply failed'}</div>`;
+                        button.textContent = 'Failed';
+                        button.classList.remove('btn-primary');
+                        button.classList.add('btn-danger');
+                    } else if (data.status === 'started') {
+                        // Still starting, wait for SSE
+                        statusEl.textContent = 'Connecting...';
+                    }
+
+                    if (data.fields_filled) {
+                        messageEl.innerHTML += `<div style="font-size: 11px; color: var(--text-muted);">Fields filled: ${data.fields_filled}</div>`;
+                    }
+                };
+
+                try {
+                    // Start with browser step
+                    statusEl.textContent = 'Starting browser...';
+                    updateStep('browser', 'active');
+                    progressBarFill.style.width = '5%';
+
+                    // First, trigger the auto-apply (which now starts in background)
+                    const response = await fetch(`/api/apply/${appId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ headless: true, auto_submit: true })
+                    });
+
+                    const contentType = response.headers.get('content-type');
+                    if (!contentType || !contentType.includes('application/json')) {
+                        const text = await response.text();
+                        console.error('Non-JSON response:', text.substring(0, 500));
+                        throw new Error('Server returned non-JSON response.');
+                    }
+
+                    const initData = await response.json();
+
+                    if (!initData.success) {
+                        throw new Error(initData.error || 'Failed to start auto-apply');
+                    }
+
+                    // Now connect to SSE for progress updates
+                    statusEl.textContent = 'Connecting to progress stream...';
+                    const eventSource = new EventSource(`/api/apply/${appId}/progress`);
+
+                    eventSource.onmessage = function(event) {
+                        try {
+                            const msg = JSON.parse(event.data);
+
+                            if (msg.type === 'heartbeat') {
+                                // Just a keep-alive, ignore
+                                return;
+                            }
+
+                            if (msg.type === 'progress' && msg.data) {
+                                const data = msg.data;
+                                // Update current stage
+                                if (data.current_stage) {
+                                    statusEl.textContent = data.stages[data.current_stage]?.message || data.current_stage;
+                                }
+                                // Update all stages
+                                if (data.stages) {
+                                    updateFromStages(data.stages);
+                                }
+                                // Add new logs
+                                if (data.logs && data.logs.length > 0) {
+                                    const lastLog = data.logs[data.logs.length - 1];
+                                    if (logsEl.lastChild?.textContent !== lastLog) {
+                                        addLog(lastLog);
+                                    }
+                                }
+                            }
+
+                            if (msg.type === 'complete' || msg.type === 'error') {
+                                eventSource.close();
+                                const result = msg.result || {};
+
+                                // Update final stages
+                                if (result.progress && result.progress.stages) {
+                                    updateFromStages(result.progress.stages);
+                                }
+
+                                handleFinalResult(result);
+                            }
+                        } catch (e) {
+                            console.error('Error parsing SSE message:', e);
+                        }
+                    };
+
+                    eventSource.onerror = function(err) {
+                        console.error('SSE error:', err);
+                        eventSource.close();
+                        statusEl.textContent = 'Connection lost';
+                        messageEl.innerHTML = '<div class="alert alert-warning">Progress stream disconnected. Check application status.</div>';
+                        button.disabled = false;
+                        button.textContent = 'Retry';
+                    };
+
+                } catch (err) {
+                    updateStep('browser', 'error');
+                    statusEl.textContent = 'Error';
+                    messageEl.innerHTML = `<div class="alert alert-error">${err.message}</div>`;
+                    button.textContent = 'Error';
+                    button.classList.remove('btn-primary');
+                    button.classList.add('btn-danger');
+                    button.disabled = false;
+                }
+            });
+        });
+    }
+});
+{% endblock %}

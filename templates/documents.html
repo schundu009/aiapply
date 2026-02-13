@@ -1,0 +1,472 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <h2>Documents</h2>
+</div>
+
+<div class="grid-2">
+    <!-- Resumes Panel -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Resumes</h3>
+        </div>
+
+        <div class="form-group">
+            <label for="resume-upload">Upload Resume</label>
+            <input type="file" id="resume-upload" accept=".pdf,.docx">
+            <span class="helper-text">Supported formats: PDF, DOCX</span>
+        </div>
+
+        {% if resumes %}
+        <ul class="file-list" id="resume-list">
+            {% for filename in resumes %}
+            <li class="file-item" data-filename="{{ filename }}">
+                <div class="file-info">
+                    <span class="file-name">{{ filename }}</span>
+                    {% if filename == default_resume %}
+                    <span class="badge badge-success file-default-badge">Active</span>
+                    {% endif %}
+                </div>
+                <div class="file-actions">
+                    {% if filename != default_resume %}
+                    <button class="btn btn-sm btn-primary set-default-resume" data-filename="{{ filename }}">Set Active</button>
+                    {% endif %}
+                    <button class="btn btn-sm btn-secondary open-resume" data-filename="{{ filename }}">Open</button>
+                    <button class="btn btn-sm btn-danger delete-resume" data-filename="{{ filename }}">Delete</button>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div class="empty-state">
+            <p>No resumes uploaded. Upload a PDF or DOCX to get started.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Cover Letters Panel -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Cover Letters</h3>
+        </div>
+
+        <div class="form-group">
+            <label for="cl-upload">Upload Cover Letter</label>
+            <input type="file" id="cl-upload" accept=".pdf,.docx">
+            <span class="helper-text">Supported formats: PDF, DOCX</span>
+        </div>
+
+        {% if cover_letters %}
+        <ul class="file-list" id="cl-list">
+            {% for filename in cover_letters %}
+            <li class="file-item" data-filename="{{ filename }}">
+                <div class="file-info">
+                    <span class="file-name">{{ filename }}</span>
+                </div>
+                <div class="file-actions">
+                    <button class="btn btn-sm btn-danger delete-cl" data-filename="{{ filename }}">Delete</button>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <div class="empty-state">
+            <p>No cover letters uploaded</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Resume Viewer / Editor Panel (appears below when a resume is opened) -->
+<div id="resume-viewer" class="card doc-viewer" style="display: none;">
+    <div class="card-header">
+        <div class="viewer-title">
+            <h3 id="viewer-filename"></h3>
+            <span class="badge badge-info" id="viewer-mode-badge">Viewing</span>
+        </div>
+        <div class="viewer-actions">
+            <button class="btn btn-sm btn-secondary" id="btn-edit">Edit</button>
+            <button class="btn btn-sm btn-primary" id="btn-save" style="display: none;">Save</button>
+            <button class="btn btn-sm btn-secondary" id="btn-cancel" style="display: none;">Cancel</button>
+            <button class="btn btn-sm btn-secondary" id="btn-close">Close</button>
+        </div>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="viewer-tabs">
+        <button class="viewer-tab active" data-tab="fulltext">Full Text</button>
+        <button class="viewer-tab" data-tab="experience">Experience</button>
+    </div>
+
+    <!-- Full Text tab -->
+    <div id="tab-fulltext" class="viewer-body tab-content active">
+        <pre id="viewer-text" class="preview-text"></pre>
+        <textarea id="viewer-editor" class="viewer-editor" style="display: none;"></textarea>
+    </div>
+
+    <!-- Experience tab -->
+    <div id="tab-experience" class="tab-content" style="display: none;">
+        <div class="exp-toolbar">
+            <button class="btn btn-sm btn-primary" id="btn-add-exp">Add Position</button>
+            <button class="btn btn-sm btn-primary" id="btn-save-exp" style="display: none;">Save All Changes</button>
+        </div>
+        <div id="experience-list"></div>
+    </div>
+</div>
+
+<div id="upload-status"></div>
+{% endblock %}
+
+{% block scripts %}
+document.addEventListener('DOMContentLoaded', function() {
+    const resumeUpload = document.getElementById('resume-upload');
+    const clUpload = document.getElementById('cl-upload');
+    const statusDiv = document.getElementById('upload-status');
+
+    // Viewer elements
+    const viewer = document.getElementById('resume-viewer');
+    const viewerFilename = document.getElementById('viewer-filename');
+    const viewerModeBadge = document.getElementById('viewer-mode-badge');
+    const viewerText = document.getElementById('viewer-text');
+    const viewerEditor = document.getElementById('viewer-editor');
+    const btnEdit = document.getElementById('btn-edit');
+    const btnSave = document.getElementById('btn-save');
+    const btnCancel = document.getElementById('btn-cancel');
+    const btnClose = document.getElementById('btn-close');
+
+    // Experience elements
+    const experienceList = document.getElementById('experience-list');
+    const btnAddExp = document.getElementById('btn-add-exp');
+    const btnSaveExp = document.getElementById('btn-save-exp');
+
+    // Tab elements
+    const tabs = document.querySelectorAll('.viewer-tab');
+    const tabFulltext = document.getElementById('tab-fulltext');
+    const tabExperience = document.getElementById('tab-experience');
+
+    let currentOpenFile = null;
+    let experienceData = [];
+    let expDirty = false;
+
+    const ALLOWED_EXT = ['.pdf', '.docx'];
+
+    function isAllowedFile(file) {
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+        return ALLOWED_EXT.includes(ext);
+    }
+
+    function showStatus(message, type) {
+        statusDiv.innerHTML = `<div class="alert alert-${type}" style="margin-top: 20px;">${message}</div>`;
+        setTimeout(() => statusDiv.innerHTML = '', 3000);
+    }
+
+    // ── Tab switching ──
+    tabs.forEach(tab => {
+        tab.addEventListener('click', function() {
+            tabs.forEach(t => t.classList.remove('active'));
+            this.classList.add('active');
+            const target = this.dataset.tab;
+            tabFulltext.classList.toggle('active', target === 'fulltext');
+            tabExperience.classList.toggle('active', target === 'experience');
+            tabFulltext.style.display = target === 'fulltext' ? 'block' : 'none';
+            tabExperience.style.display = target === 'experience' ? 'block' : 'none';
+
+            // Load experience data when switching to that tab
+            if (target === 'experience' && currentOpenFile) {
+                loadExperience(currentOpenFile);
+            }
+        });
+    });
+
+    // ── Upload handlers ──
+    resumeUpload.addEventListener('change', async function() {
+        if (this.files.length === 0) return;
+        if (!isAllowedFile(this.files[0])) { showStatus('Only PDF and DOCX files are allowed', 'error'); this.value = ''; return; }
+        const formData = new FormData();
+        formData.append('file', this.files[0]);
+        try {
+            const resp = await fetch('/api/upload/resume', { method: 'POST', body: formData });
+            const data = await resp.json();
+            if (data.success) { showStatus('Resume uploaded successfully', 'success'); setTimeout(() => location.reload(), 1000); }
+            else { showStatus(data.error, 'error'); }
+        } catch (err) { showStatus('Upload failed: ' + err.message, 'error'); }
+    });
+
+    clUpload.addEventListener('change', async function() {
+        if (this.files.length === 0) return;
+        if (!isAllowedFile(this.files[0])) { showStatus('Only PDF and DOCX files are allowed', 'error'); this.value = ''; return; }
+        const formData = new FormData();
+        formData.append('file', this.files[0]);
+        try {
+            const resp = await fetch('/api/upload/cover-letter', { method: 'POST', body: formData });
+            const data = await resp.json();
+            if (data.success) { showStatus('Cover letter uploaded successfully', 'success'); setTimeout(() => location.reload(), 1000); }
+            else { showStatus(data.error, 'error'); }
+        } catch (err) { showStatus('Upload failed: ' + err.message, 'error'); }
+    });
+
+    // ── Set Active Resume ──
+    document.querySelectorAll('.set-default-resume').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const filename = this.dataset.filename;
+            try {
+                const resp = await fetch('/api/resume/set-default', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename })
+                });
+                const data = await resp.json();
+                if (data.success) { showStatus('"' + filename + '" set as active resume', 'success'); setTimeout(() => location.reload(), 800); }
+                else { showStatus(data.error, 'error'); }
+            } catch (err) { showStatus('Failed: ' + err.message, 'error'); }
+        });
+    });
+
+    // ── Open Resume ──
+    document.querySelectorAll('.open-resume').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const filename = this.dataset.filename;
+            currentOpenFile = filename;
+            viewerFilename.textContent = filename;
+            viewerText.textContent = 'Loading...';
+            viewerText.style.display = 'block';
+            viewerEditor.style.display = 'none';
+            btnEdit.style.display = '';
+            btnSave.style.display = 'none';
+            btnCancel.style.display = 'none';
+            viewerModeBadge.textContent = 'Viewing';
+            viewerModeBadge.className = 'badge badge-info';
+
+            // Reset to Full Text tab
+            tabs.forEach(t => t.classList.remove('active'));
+            tabs[0].classList.add('active');
+            tabFulltext.classList.add('active');
+            tabExperience.classList.remove('active');
+            tabFulltext.style.display = 'block';
+            tabExperience.style.display = 'none';
+
+            viewer.style.display = 'block';
+            viewer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+            try {
+                const resp = await fetch('/api/preview/resume/' + encodeURIComponent(filename));
+                const data = await resp.json();
+                viewerText.textContent = data.text || 'Could not load preview.';
+            } catch (err) { viewerText.textContent = 'Preview failed: ' + err.message; }
+        });
+    });
+
+    // ── Full Text Edit/Save/Cancel ──
+    btnEdit.addEventListener('click', function() {
+        viewerEditor.value = viewerText.textContent;
+        viewerText.style.display = 'none';
+        viewerEditor.style.display = 'block';
+        btnEdit.style.display = 'none';
+        btnSave.style.display = '';
+        btnCancel.style.display = '';
+        viewerModeBadge.textContent = 'Editing';
+        viewerModeBadge.className = 'badge badge-warning';
+        viewerEditor.focus();
+    });
+
+    btnCancel.addEventListener('click', function() {
+        viewerText.style.display = 'block';
+        viewerEditor.style.display = 'none';
+        btnEdit.style.display = '';
+        btnSave.style.display = 'none';
+        btnCancel.style.display = 'none';
+        viewerModeBadge.textContent = 'Viewing';
+        viewerModeBadge.className = 'badge badge-info';
+    });
+
+    btnSave.addEventListener('click', async function() {
+        const newText = viewerEditor.value;
+        try {
+            const resp = await fetch('/api/resume/update-text', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: currentOpenFile, text: newText })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                viewerText.textContent = newText;
+                viewerText.style.display = 'block';
+                viewerEditor.style.display = 'none';
+                btnEdit.style.display = '';
+                btnSave.style.display = 'none';
+                btnCancel.style.display = 'none';
+                viewerModeBadge.textContent = 'Viewing';
+                viewerModeBadge.className = 'badge badge-info';
+                showStatus('Resume text updated', 'success');
+            } else { showStatus(data.error, 'error'); }
+        } catch (err) { showStatus('Save failed: ' + err.message, 'error'); }
+    });
+
+    btnClose.addEventListener('click', function() {
+        viewer.style.display = 'none';
+        currentOpenFile = null;
+    });
+
+    // ══════════════════════════════════════════
+    //  EXPERIENCE TAB
+    // ══════════════════════════════════════════
+
+    async function loadExperience(filename) {
+        experienceList.innerHTML = '<p class="helper-text">Loading experience...</p>';
+        btnSaveExp.style.display = 'none';
+        expDirty = false;
+        try {
+            const resp = await fetch('/api/resume/experience/' + encodeURIComponent(filename));
+            const data = await resp.json();
+            experienceData = data.experience || [];
+            renderExperience();
+        } catch (err) {
+            experienceList.innerHTML = '<p class="helper-text">Failed to load experience.</p>';
+        }
+    }
+
+    function renderExperience() {
+        if (experienceData.length === 0) {
+            experienceList.innerHTML = '<div class="empty-state"><p>No experience entries parsed from this resume.</p></div>';
+            return;
+        }
+        let html = '';
+        experienceData.forEach((job, idx) => {
+            const bullets = (job.bullets || []).join('\n');
+            html += `
+            <div class="exp-card" data-index="${idx}">
+                <div class="exp-card-header">
+                    <span class="exp-number">${idx + 1}</span>
+                    <button class="btn btn-sm btn-danger exp-delete" data-index="${idx}">Remove</button>
+                </div>
+                <div class="exp-card-body">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Job Title</label>
+                            <input type="text" class="exp-field" data-index="${idx}" data-field="job_title" value="${esc(job.job_title || '')}">
+                        </div>
+                        <div class="form-group">
+                            <label>Company</label>
+                            <input type="text" class="exp-field" data-index="${idx}" data-field="company" value="${esc(job.company || '')}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Dates</label>
+                            <input type="text" class="exp-field" data-index="${idx}" data-field="dates" value="${esc(job.dates || '')}" placeholder="e.g. Oct 2023 - Jan 2026">
+                        </div>
+                        <div class="form-group">
+                            <label>Location</label>
+                            <input type="text" class="exp-field" data-index="${idx}" data-field="location" value="${esc(job.location || '')}" placeholder="e.g. San Jose, CA">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Achievements / Bullets (one per line)</label>
+                        <textarea class="exp-bullets" data-index="${idx}" rows="6">${esc(bullets)}</textarea>
+                    </div>
+                </div>
+            </div>`;
+        });
+        experienceList.innerHTML = html;
+        attachExpListeners();
+    }
+
+    function esc(str) {
+        const d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML.replace(/"/g, '&quot;');
+    }
+
+    function attachExpListeners() {
+        // Mark dirty on any change
+        experienceList.querySelectorAll('.exp-field, .exp-bullets').forEach(el => {
+            el.addEventListener('input', function() {
+                const idx = parseInt(this.dataset.index);
+                const field = this.dataset.field;
+                if (field) {
+                    experienceData[idx][field] = this.value;
+                } else {
+                    // bullets textarea
+                    experienceData[idx].bullets = this.value.split('\n').filter(l => l.trim());
+                }
+                if (!expDirty) {
+                    expDirty = true;
+                    btnSaveExp.style.display = '';
+                }
+            });
+        });
+
+        // Delete
+        experienceList.querySelectorAll('.exp-delete').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const idx = parseInt(this.dataset.index);
+                if (!confirm('Remove this position?')) return;
+                experienceData.splice(idx, 1);
+                renderExperience();
+                expDirty = true;
+                btnSaveExp.style.display = '';
+            });
+        });
+    }
+
+    // Add new position
+    btnAddExp.addEventListener('click', function() {
+        experienceData.push({ job_title: '', company: '', dates: '', location: '', bullets: [] });
+        renderExperience();
+        expDirty = true;
+        btnSaveExp.style.display = '';
+        // Scroll to bottom
+        const lastCard = experienceList.querySelector('.exp-card:last-child');
+        if (lastCard) lastCard.scrollIntoView({ behavior: 'smooth' });
+    });
+
+    // Save experience
+    btnSaveExp.addEventListener('click', async function() {
+        try {
+            const resp = await fetch('/api/resume/experience/' + encodeURIComponent(currentOpenFile), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ experience: experienceData })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                showStatus('Experience updated and saved to resume', 'success');
+                expDirty = false;
+                btnSaveExp.style.display = 'none';
+                // Refresh the full text view too
+                const previewResp = await fetch('/api/preview/resume/' + encodeURIComponent(currentOpenFile));
+                const previewData = await previewResp.json();
+                if (previewData.text) viewerText.textContent = previewData.text;
+            } else { showStatus(data.error, 'error'); }
+        } catch (err) { showStatus('Save failed: ' + err.message, 'error'); }
+    });
+
+    // ── Delete resume ──
+    document.querySelectorAll('.delete-resume').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const filename = this.dataset.filename;
+            if (!confirm('Delete "' + filename + '"?')) return;
+            try {
+                const resp = await fetch('/api/delete/resume/' + encodeURIComponent(filename), { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.success) {
+                    if (currentOpenFile === filename) { viewer.style.display = 'none'; currentOpenFile = null; }
+                    location.reload();
+                }
+            } catch (err) { showStatus('Delete failed', 'error'); }
+        });
+    });
+
+    // ── Delete cover letter ──
+    document.querySelectorAll('.delete-cl').forEach(btn => {
+        btn.addEventListener('click', async function() {
+            const filename = this.dataset.filename;
+            if (!confirm('Delete "' + filename + '"?')) return;
+            try {
+                const resp = await fetch('/api/delete/cover-letter/' + encodeURIComponent(filename), { method: 'DELETE' });
+                const data = await resp.json();
+                if (data.success) { location.reload(); }
+            } catch (err) { showStatus('Delete failed', 'error'); }
+        });
+    });
+});
+{% endblock %}
