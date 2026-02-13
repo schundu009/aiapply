@@ -136,10 +136,15 @@ def get_db_session():
         session.close()
 
 
-# Initialize on module load
-_db_available = init_database()
+# Lazy initialization - don't connect on import
+_db_initialized = False
+_db_available = False
 
 
 def is_database_available():
-    """Check if database is available."""
+    """Check if database is available. Initializes on first call."""
+    global _db_initialized, _db_available
+    if not _db_initialized:
+        _db_initialized = True
+        _db_available = init_database()
     return _db_available and engine is not None

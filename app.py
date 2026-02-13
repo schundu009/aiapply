@@ -20,7 +20,15 @@ from docx import Document
 
 from src.browser_automation import BrowserAutomation
 from src.config import settings
-from src.database import is_database_available, get_db_session, ApplicationDB, UploadedDocumentDB, SettingsDB
+try:
+    from src.database import is_database_available, get_db_session, ApplicationDB, UploadedDocumentDB, SettingsDB
+except Exception as e:
+    print(f"Warning: Database module failed to load: {e}")
+    def is_database_available(): return False
+    def get_db_session(): raise RuntimeError("Database not available")
+    ApplicationDB = None
+    UploadedDocumentDB = None
+    SettingsDB = None
 from src.email_notifier import email_notifier
 from src.job_analyzer import JobAnalyzer
 from src.job_fetcher import JobFetcher
