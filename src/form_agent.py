@@ -40,14 +40,20 @@ class FormAgent:
 
     def _init_anthropic(self):
         """Initialize Anthropic client."""
-        from anthropic import Anthropic
+        try:
+            from anthropic import Anthropic
+        except ImportError:
+            raise ValueError("anthropic package not installed. Run: pip install anthropic")
         self.client = Anthropic(api_key=settings.anthropic_api_key)
         self.model = settings.anthropic_model
         self.provider = "anthropic"
 
     def _init_openai(self):
         """Initialize OpenAI client."""
-        from openai import OpenAI
+        try:
+            from openai import OpenAI
+        except ImportError:
+            raise ValueError("openai package not installed. Run: pip install openai")
         self.client = OpenAI(api_key=settings.openai_api_key)
         self.model = getattr(settings, 'openai_model', 'gpt-4o')
         self.provider = "openai"

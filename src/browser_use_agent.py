@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Optional
 import json
 
+from .config import settings
+
 
 class BrowserUseFormFiller:
     """Uses browser-use library for LLM-powered form filling."""
@@ -36,7 +38,7 @@ class BrowserUseFormFiller:
 
             # Use Anthropic Claude as the LLM
             llm = ChatAnthropic(
-                model="claude-sonnet-4-20250514",
+                model=settings.anthropic_model,
                 api_key=self.anthropic_key,
                 max_tokens=4096,
             )

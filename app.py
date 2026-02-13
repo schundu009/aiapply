@@ -1218,11 +1218,10 @@ def apply_progress_stream(app_id):
                         yield 'data: {}\n\n'.format(json.dumps({'type': 'complete', 'result': result}))
                         break
 
-        # Cleanup
+        # Cleanup - mark stream as closed instead of removing queue
         with apply_progress_lock:
             if app_id in apply_progress_store:
-                # Keep result for a while but remove queue
-                apply_progress_store[app_id]['queue'] = None
+                apply_progress_store[app_id]['stream_closed'] = True
 
     return Response(
         generate(),

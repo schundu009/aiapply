@@ -27,8 +27,8 @@ class EmailNotifier:
         """Check if email is properly configured."""
         return bool(
             self.enabled
-            and self.smtp_host
-            and self.smtp_user
+            and self.smtp_host and self.smtp_host.strip()
+            and self.smtp_user and self.smtp_user.strip()
             and self.smtp_password
         )
 

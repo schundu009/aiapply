@@ -11,8 +11,12 @@ from datetime import datetime
 from pathlib import Path
 import json
 import enum
+import threading
 
 from .config import settings
+
+# Thread lock for database initialization
+_db_lock = threading.Lock()
 
 Base = declarative_base()
 engine = None
@@ -142,9 +146,11 @@ _db_available = False
 
 
 def is_database_available():
-    """Check if database is available. Initializes on first call."""
+    """Check if database is available. Initializes on first call (thread-safe)."""
     global _db_initialized, _db_available
     if not _db_initialized:
-        _db_initialized = True
-        _db_available = init_database()
+        with _db_lock:
+            if not _db_initialized:  # Double-check pattern
+                _db_available = init_database()
+                _db_initialized = True
     return _db_available and engine is not None
