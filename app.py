@@ -20,6 +20,7 @@ from docx import Document
 
 from src.browser_automation import BrowserAutomation
 from src.config import settings
+from src.database import is_database_available, get_db_session, ApplicationDB, UploadedDocumentDB, SettingsDB
 from src.email_notifier import email_notifier
 from src.job_analyzer import JobAnalyzer
 from src.job_fetcher import JobFetcher
@@ -84,7 +85,45 @@ SETTINGS_FILE = Path('data/settings.json')
 
 
 def _save_upload_data():
-    """Persist upload metadata to disk so it survives restarts."""
+    """Persist upload metadata to disk or database."""
+    if is_database_available():
+        try:
+            with get_db_session() as db:
+                # Save resumes
+                for filename, data in uploaded_resumes.items():
+                    existing = db.query(UploadedDocumentDB).filter_by(
+                        filename=filename, doc_type='resume'
+                    ).first()
+                    if existing:
+                        existing.text_content = data.get('text', '')
+                        existing.is_default = (filename == default_resume_filename)
+                    else:
+                        doc = UploadedDocumentDB(
+                            filename=filename,
+                            doc_type='resume',
+                            text_content=data.get('text', ''),
+                            is_default=(filename == default_resume_filename)
+                        )
+                        db.add(doc)
+                # Save cover letters
+                for filename, data in uploaded_cover_letters.items():
+                    existing = db.query(UploadedDocumentDB).filter_by(
+                        filename=filename, doc_type='cover_letter'
+                    ).first()
+                    if existing:
+                        existing.text_content = data.get('text', '')
+                    else:
+                        doc = UploadedDocumentDB(
+                            filename=filename,
+                            doc_type='cover_letter',
+                            text_content=data.get('text', '')
+                        )
+                        db.add(doc)
+            return
+        except Exception as e:
+            print(f"Database save failed, falling back to file: {e}")
+
+    # Fallback to file storage
     data = {
         'resumes': uploaded_resumes,
         'cover_letters': uploaded_cover_letters,
@@ -95,8 +134,33 @@ def _save_upload_data():
 
 
 def _load_upload_data():
-    """Load persisted upload data on startup."""
+    """Load persisted upload data from database or disk."""
     global uploaded_resumes, uploaded_cover_letters, default_resume_filename
+
+    if is_database_available():
+        try:
+            with get_db_session() as db:
+                # Load resumes
+                resumes = db.query(UploadedDocumentDB).filter_by(doc_type='resume').all()
+                for doc in resumes:
+                    uploaded_resumes[doc.filename] = {
+                        'text': doc.text_content or '',
+                        'uploaded': doc.uploaded_at.isoformat() if doc.uploaded_at else ''
+                    }
+                    if doc.is_default:
+                        default_resume_filename = doc.filename
+                # Load cover letters
+                covers = db.query(UploadedDocumentDB).filter_by(doc_type='cover_letter').all()
+                for doc in covers:
+                    uploaded_cover_letters[doc.filename] = {
+                        'text': doc.text_content or '',
+                        'uploaded': doc.uploaded_at.isoformat() if doc.uploaded_at else ''
+                    }
+            return
+        except Exception as e:
+            print(f"Database load failed, falling back to file: {e}")
+
+    # Fallback to file storage
     if UPLOAD_DATA_FILE.exists():
         try:
             data = json.loads(UPLOAD_DATA_FILE.read_text())
@@ -108,13 +172,61 @@ def _load_upload_data():
 
 
 def _save_applications_data():
-    """Persist applications to disk so they survive restarts."""
+    """Persist applications to database or disk."""
+    if is_database_available():
+        try:
+            with get_db_session() as db:
+                for app in applications:
+                    existing = db.query(ApplicationDB).filter_by(id=app.id).first()
+                    if existing:
+                        # Update existing
+                        existing.status = app.status.value if hasattr(app.status, 'value') else str(app.status)
+                        existing.error_message = app.error_message
+                        existing.notes = app.notes
+                        existing.follow_up_date = app.follow_up_date
+                        existing.email_sent = app.email_sent
+                        existing.applied_at = app.applied_at
+                        if app.job_description:
+                            existing.company_name = app.job_description.company_name
+                            existing.job_title = app.job_description.job_title
+                            existing.location = app.job_description.location
+                            existing.job_description_json = app.job_description.model_dump(mode='json') if hasattr(app.job_description, 'model_dump') else None
+                        if app.tailored_resume:
+                            existing.tailored_resume_json = app.tailored_resume.model_dump(mode='json') if hasattr(app.tailored_resume, 'model_dump') else None
+                        if app.cover_letter:
+                            existing.cover_letter_json = app.cover_letter.model_dump(mode='json') if hasattr(app.cover_letter, 'model_dump') else None
+                        existing.output_dir = str(app.output_dir) if app.output_dir else None
+                        existing.resume_filename = app.resume_filename
+                        existing.cover_letter_filename = app.cover_letter_filename
+                    else:
+                        # Create new
+                        app_db = ApplicationDB(
+                            id=app.id,
+                            job_url=str(app.job_url),
+                            status=app.status.value if hasattr(app.status, 'value') else str(app.status),
+                            company_name=app.job_description.company_name if app.job_description else None,
+                            job_title=app.job_description.job_title if app.job_description else None,
+                            location=app.job_description.location if app.job_description else None,
+                            job_description_json=app.job_description.model_dump(mode='json') if app.job_description and hasattr(app.job_description, 'model_dump') else None,
+                            tailored_resume_json=app.tailored_resume.model_dump(mode='json') if app.tailored_resume and hasattr(app.tailored_resume, 'model_dump') else None,
+                            cover_letter_json=app.cover_letter.model_dump(mode='json') if app.cover_letter and hasattr(app.cover_letter, 'model_dump') else None,
+                            output_dir=str(app.output_dir) if app.output_dir else None,
+                            resume_filename=app.resume_filename,
+                            cover_letter_filename=app.cover_letter_filename,
+                            error_message=app.error_message,
+                            email_sent=app.email_sent,
+                            applied_at=app.applied_at
+                        )
+                        db.add(app_db)
+            return
+        except Exception as e:
+            print(f"Database save failed, falling back to file: {e}")
+
+    # Fallback to file storage
     APPLICATIONS_DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
-    # Serialize applications using model_dump with JSON-safe types
     data = []
     for app in applications:
         app_dict = app.model_dump(mode='json')
-        # Convert Path objects to strings
         if app_dict.get('output_dir'):
             app_dict['output_dir'] = str(app_dict['output_dir'])
         data.append(app_dict)
@@ -122,13 +234,38 @@ def _save_applications_data():
 
 
 def _load_applications_data():
-    """Load persisted applications on startup."""
+    """Load persisted applications from database or disk."""
     global applications
+
+    if is_database_available():
+        try:
+            with get_db_session() as db:
+                app_records = db.query(ApplicationDB).order_by(ApplicationDB.created_at.desc()).all()
+                for app_db in app_records:
+                    app_dict = {
+                        'id': app_db.id,
+                        'job_url': app_db.job_url,
+                        'status': app_db.status,
+                        'error_message': app_db.error_message,
+                        'notes': app_db.notes,
+                        'follow_up_date': app_db.follow_up_date,
+                        'email_sent': app_db.email_sent,
+                        'applied_at': app_db.applied_at,
+                        'output_dir': Path(app_db.output_dir) if app_db.output_dir else None,
+                        'resume_filename': app_db.resume_filename,
+                        'cover_letter_filename': app_db.cover_letter_filename,
+                    }
+                    # Reconstruct complex objects from JSON if needed
+                    applications.append(Application(**app_dict))
+            return
+        except Exception as e:
+            print(f"Database load failed, falling back to file: {e}")
+
+    # Fallback to file storage
     if APPLICATIONS_DATA_FILE.exists():
         try:
             data = json.loads(APPLICATIONS_DATA_FILE.read_text())
             for app_dict in data:
-                # Convert output_dir back to Path if present
                 if app_dict.get('output_dir'):
                     app_dict['output_dir'] = Path(app_dict['output_dir'])
                 applications.append(Application(**app_dict))

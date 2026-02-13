@@ -38,6 +38,18 @@ class Settings(BaseSettings):
     smtp_password: str = Field(default="")
     smtp_from_email: str = Field(default="")
     email_notifications_enabled: bool = Field(default=False)
+    # Database settings (shared with jobportal on Railway)
+    database_url: str = Field(default="", description="PostgreSQL connection URL")
+    redis_url: str = Field(default="", description="Redis connection URL")
+
+    @property
+    def is_postgres(self) -> bool:
+        return bool(self.database_url) and "postgresql" in self.database_url
+
+    @property
+    def use_database(self) -> bool:
+        """Whether to use database storage instead of JSON files."""
+        return self.is_postgres
 
     def __init__(self, **kwargs):
         # Load from JSON settings first, then override with kwargs/env
