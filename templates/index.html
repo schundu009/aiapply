@@ -5,9 +5,9 @@
     <h2>Job Applications</h2>
 </div>
 
-<div id="resume-warning" class="alert alert-warning" style="display: none; margin-bottom: 20px; padding: 16px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; color: #92400e;">
-    <strong>⚠️ No Resume Uploaded</strong><br>
-    Please <a href="/documents" style="color: #92400e; font-weight: 600; text-decoration: underline;">upload your resume</a> first before processing job applications.
+<div id="resume-warning" class="alert alert-warning" style="display: none;">
+    <strong>No Resume Uploaded</strong> -
+    Please <a href="/documents">upload your resume</a> first before processing job applications.
 </div>
 
 <div class="stats-grid">
@@ -282,8 +282,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 </div>
                                 ${result.technologies && result.technologies.length > 0 ? `
                                     <div style="margin: 8px 0; font-size: 13px; line-height: 1.6;">
-                                        <strong style="color: #555;">Tech:</strong>
-                                        <span style="color: #333;">${result.technologies.join(', ')}</span>
+                                        <strong style="color: var(--text-muted);">Tech:</strong>
+                                        <span style="color: var(--text-secondary);">${result.technologies.join(', ')}</span>
                                     </div>
                                 ` : ''}
                                 ${result.required_skills && result.required_skills.length > 0 ? `

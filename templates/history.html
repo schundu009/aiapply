@@ -139,7 +139,7 @@
                                 <!-- Application Info -->
                                 <div class="tracking-section">
                                     <h4>Application Details</h4>
-                                    <div style="font-size: 13px; color: #374151;">
+                                    <div style="font-size: 13px; color: var(--text-secondary);">
                                         {% if app.job_description %}
                                         <p><strong>Company:</strong> {{ app.job_description.company_name }}</p>
                                         <p><strong>Position:</strong> {{ app.job_description.job_title }}</p>
@@ -162,7 +162,7 @@
                                             ({{ "%.0f"|format(app.job_viability.match_score) }}%)
                                         </p>
                                         {% if app.job_viability.viability_notes %}
-                                        <ul style="margin-top: 8px; padding-left: 20px; color: #6b7280; font-size: 12px;">
+                                        <ul style="margin-top: 8px; padding-left: 20px; color: var(--text-muted); font-size: 12px;">
                                             {% for note in app.job_viability.viability_notes %}
                                             <li>{{ note }}</li>
                                             {% endfor %}

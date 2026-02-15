@@ -1,16 +1,29 @@
 #!/usr/bin/env python3
-"""AutoApply - Enterprise Job Application Platform"""
+"""AutoApply - Enterprise Job Application Platform
+
+Enterprise-grade features:
+- Structured logging with request tracing
+- Rate limiting for API endpoints
+- Standardized API responses
+- Health checks with dependency status
+- Input validation and sanitization
+"""
 
 import asyncio
 import hashlib
 import io
 import json
+import logging
 import os
-from datetime import datetime
+import re
+import shutil
+import sys
+from collections import defaultdict
+from datetime import datetime, timedelta
 from pathlib import Path
-from functools import wraps
+from urllib.parse import urlparse
 
-from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, flash, Response
+from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, flash, Response, g
 from werkzeug.utils import secure_filename
 import threading
 import queue
@@ -37,24 +50,203 @@ from src.notion_client import parse_resume_from_text
 from src.pdf_generator import PDFGenerator
 from src.resume_generator import ResumeGenerator
 
+# ============================================
+# Logging Configuration
+# ============================================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger('autoapply')
+
+# ============================================
+# Flask App Configuration
+# ============================================
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
 app.config['UPLOAD_FOLDER'] = Path('uploads')
 app.config['UPLOAD_FOLDER'].mkdir(exist_ok=True)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
 
+# ============================================
+# Rate Limiting (Simple in-memory implementation)
+# ============================================
+rate_limit_store = defaultdict(list)
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_REQUESTS = 30  # max requests per window
 
+
+def check_rate_limit(identifier: str) -> bool:
+    """Check if request should be rate limited. Returns True if allowed."""
+    now = time.time()
+    window_start = now - RATE_LIMIT_WINDOW
+
+    # Clean old entries
+    rate_limit_store[identifier] = [t for t in rate_limit_store[identifier] if t > window_start]
+
+    if len(rate_limit_store[identifier]) >= RATE_LIMIT_MAX_REQUESTS:
+        return False
+
+    rate_limit_store[identifier].append(now)
+    return True
+
+
+# ============================================
+# API Response Helpers
+# ============================================
+def api_success(data=None, message=None, status_code=200):
+    """Standardized success response."""
+    response = {'success': True}
+    if data is not None:
+        response['data'] = data
+    if message:
+        response['message'] = message
+    return jsonify(response), status_code
+
+
+def api_error(error, status_code=400, details=None):
+    """Standardized error response."""
+    response = {'success': False, 'error': str(error)}
+    if details:
+        response['details'] = details
+    return jsonify(response), status_code
+
+
+# ============================================
+# Input Validation Helpers
+# ============================================
+def validate_url(url: str) -> tuple[bool, str]:
+    """Validate a job URL. Returns (is_valid, error_message)."""
+    if not url:
+        return False, "URL is required"
+
+    try:
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            return False, "Invalid URL format"
+        if parsed.scheme not in ('http', 'https'):
+            return False, "URL must use HTTP or HTTPS"
+        return True, ""
+    except Exception as e:
+        return False, f"URL parsing error: {e}"
+
+
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename for safe storage."""
+    # Remove path separators and null bytes
+    filename = re.sub(r'[/\\:\x00]', '_', filename)
+    # Limit length
+    if len(filename) > 200:
+        name, ext = os.path.splitext(filename)
+        filename = name[:195] + ext
+    return secure_filename(filename)
+
+
+# ============================================
+# Health Check Endpoint (Enhanced)
+# ============================================
 @app.route('/health')
 def health_check():
-    """Simple health check endpoint for Railway."""
-    print("[Health] Health check called", flush=True)
-    return jsonify({'status': 'healthy', 'service': 'autoapply'}), 200
+    """Enhanced health check with dependency status."""
+    health = {
+        'status': 'healthy',
+        'service': 'autoapply',
+        'timestamp': datetime.utcnow().isoformat(),
+        'dependencies': {}
+    }
+
+    # Check database
+    try:
+        db_available = is_database_available()
+        health['dependencies']['database'] = 'connected' if db_available else 'disconnected'
+    except Exception as e:
+        health['dependencies']['database'] = f'error: {str(e)}'
+
+    # Check uploads directory
+    try:
+        uploads_dir = app.config['UPLOAD_FOLDER']
+        health['dependencies']['uploads'] = 'accessible' if uploads_dir.exists() else 'missing'
+    except Exception as e:
+        health['dependencies']['uploads'] = f'error: {str(e)}'
+
+    # Check output directory
+    try:
+        output_dir = Path('output')
+        health['dependencies']['output'] = 'accessible' if output_dir.exists() else 'will_create'
+    except Exception as e:
+        health['dependencies']['output'] = f'error: {str(e)}'
+
+    # Determine overall status
+    critical_deps = ['database']
+    for dep in critical_deps:
+        if 'error' in health['dependencies'].get(dep, ''):
+            health['status'] = 'degraded'
+
+    status_code = 200 if health['status'] == 'healthy' else 503
+    return jsonify(health), status_code
 
 
+@app.route('/health/ready')
+def readiness_check():
+    """Kubernetes-style readiness probe."""
+    # Check if we can accept traffic
+    try:
+        # Verify critical components are available
+        if not app.config['UPLOAD_FOLDER'].exists():
+            return api_error("Uploads directory not available", 503)
+        return api_success({'ready': True})
+    except Exception as e:
+        return api_error(f"Not ready: {e}", 503)
+
+
+@app.route('/health/live')
+def liveness_check():
+    """Kubernetes-style liveness probe."""
+    return api_success({'alive': True})
+
+
+# ============================================
+# Request Logging and Tracing
+# ============================================
 @app.before_request
-def log_request():
-    """Log incoming requests for debugging."""
-    print(f"[Request] {request.method} {request.path}", flush=True)
+def before_request_handler():
+    """Set up request context and logging."""
+    g.request_start = time.time()
+    g.request_id = hashlib.md5(f"{time.time()}{request.path}".encode()).hexdigest()[:8]
+
+    # Skip logging for health checks
+    if request.path.startswith('/health'):
+        return
+
+    # Rate limiting for API endpoints
+    if request.path.startswith('/api/'):
+        client_id = request.headers.get('X-Forwarded-For', request.remote_addr)
+        if not check_rate_limit(client_id):
+            logger.warning(f"[{g.request_id}] Rate limit exceeded for {client_id}")
+            return api_error("Rate limit exceeded. Please try again later.", 429)
+
+    logger.info(f"[{g.request_id}] {request.method} {request.path}")
+
+
+@app.after_request
+def after_request_handler(response):
+    """Log response and add headers."""
+    # Skip for health checks
+    if request.path.startswith('/health'):
+        return response
+
+    # Calculate request duration
+    duration = (time.time() - getattr(g, 'request_start', time.time())) * 1000
+    request_id = getattr(g, 'request_id', 'unknown')
+
+    # Add request ID to response headers
+    response.headers['X-Request-ID'] = request_id
+
+    # Log response
+    logger.info(f"[{request_id}] Response {response.status_code} ({duration:.1f}ms)")
+
+    return response
 
 # Global storage for SSE progress updates
 # Key: app_id, Value: {'queue': Queue, 'result': dict, 'complete': bool}
@@ -62,21 +254,22 @@ apply_progress_store = {}
 apply_progress_lock = threading.Lock()
 
 
-# Global error handler for API routes - always return JSON
+# ============================================
+# Error Handlers (Standardized)
+# ============================================
 @app.errorhandler(Exception)
 def handle_exception(e):
     """Handle all exceptions and return JSON for API routes."""
     import traceback
+    request_id = getattr(g, 'request_id', 'unknown')
+
+    # Log the error
+    logger.error(f"[{request_id}] Exception: {e}")
+    traceback.print_exc()
 
     # Check if this is an API route
     if request.path.startswith('/api/'):
-        error_msg = str(e)
-        traceback.print_exc()
-        return jsonify({
-            'success': False,
-            'error': error_msg,
-            'progress': {'stages': {}, 'logs': [error_msg]}
-        }), 500
+        return api_error(str(e), 500, {'request_id': request_id})
 
     # For non-API routes, re-raise to use default Flask error handling
     raise e
@@ -85,13 +278,61 @@ def handle_exception(e):
 @app.errorhandler(500)
 def handle_500(e):
     """Handle 500 errors - return JSON for API routes."""
+    request_id = getattr(g, 'request_id', 'unknown')
     if request.path.startswith('/api/'):
-        return jsonify({
-            'success': False,
-            'error': 'Internal server error',
-            'progress': {'stages': {}, 'logs': ['Internal server error']}
-        }), 500
+        return api_error('Internal server error', 500, {'request_id': request_id})
     raise e
+
+
+@app.errorhandler(404)
+def handle_404(e):
+    """Handle 404 errors."""
+    if request.path.startswith('/api/'):
+        return api_error('Resource not found', 404)
+    return render_template('base.html'), 404
+
+
+@app.errorhandler(429)
+def handle_429(e):
+    """Handle rate limit errors."""
+    return api_error('Rate limit exceeded. Please try again later.', 429)
+
+
+# ============================================
+# Cleanup Utilities
+# ============================================
+def cleanup_old_output_files(max_age_days: int = 7):
+    """Remove output files older than max_age_days."""
+    output_dir = Path('output')
+    if not output_dir.exists():
+        return 0
+
+    cutoff_time = datetime.now() - timedelta(days=max_age_days)
+    removed_count = 0
+
+    try:
+        for item in output_dir.iterdir():
+            if item.is_dir():
+                # Check modification time
+                mtime = datetime.fromtimestamp(item.stat().st_mtime)
+                if mtime < cutoff_time:
+                    shutil.rmtree(item, ignore_errors=True)
+                    removed_count += 1
+                    logger.info(f"Cleaned up old output directory: {item.name}")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {e}")
+
+    return removed_count
+
+
+@app.route('/api/admin/cleanup', methods=['POST'])
+def trigger_cleanup():
+    """Admin endpoint to trigger cleanup of old files."""
+    data = request.get_json(silent=True) or {}
+    max_age_days = data.get('max_age_days', 7)
+
+    removed = cleanup_old_output_files(max_age_days)
+    return api_success({'removed_directories': removed, 'max_age_days': max_age_days})
 
 
 # In-memory storage backed by disk persistence
