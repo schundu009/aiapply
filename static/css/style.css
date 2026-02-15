@@ -1636,3 +1636,36 @@ a:hover {
     color: var(--purple-light);
     text-decoration: underline;
 }
+
+/* ============================================
+   Skills Comparison Table
+   ============================================ */
+.skills-comparison {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-lg);
+    padding: 14px;
+    border: 1px solid var(--border-color);
+}
+
+.skills-comparison table {
+    background: var(--bg-secondary);
+}
+
+.skills-comparison table tbody tr:hover {
+    background: var(--bg-hover);
+}
+
+.skills-comparison table tbody tr:last-child {
+    border-bottom: none;
+}
+
+/* Scrollable table for mobile */
+@media (max-width: 768px) {
+    .skills-comparison {
+        overflow-x: auto;
+    }
+
+    .skills-comparison table {
+        min-width: 400px;
+    }
+}

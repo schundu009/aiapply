@@ -539,9 +539,9 @@ async def process_job_async(url, resume_text, personal_info=None):
 
         # Step 6: Generate PDFs
         safe = lambda s: "".join(c if c.isalnum() else "_" for c in s)[:30]
-        out_dir = Path("output") / f"{safe(job.company_name)}_{safe(job.job_title)}_{app_record.id}"
+        out_dir = Path.cwd() / "output" / f"{safe(job.company_name)}_{safe(job.job_title)}_{app_record.id}"
         out_dir.mkdir(parents=True, exist_ok=True)
-        app_record.output_dir = out_dir
+        app_record.output_dir = out_dir  # Store as absolute path
 
         # Build meaningful file names: FirstName_LastName_Company_Resume.pdf
         name_part = base.full_name.replace(" ", "_")
@@ -552,10 +552,18 @@ async def process_job_async(url, resume_text, personal_info=None):
         app_record.resume_filename = resume_filename
         app_record.cover_letter_filename = cover_filename
 
-        pdf_gen.generate_resume_pdf(resume, base, out_dir / resume_filename)
-        pdf_gen.generate_cover_letter_pdf(cover, base, out_dir / cover_filename)
+        resume_path = out_dir / resume_filename
+        cover_path = out_dir / cover_filename
+        pdf_gen.generate_resume_pdf(resume, base, resume_path)
+        pdf_gen.generate_cover_letter_pdf(cover, base, cover_path)
         (out_dir / "resume.txt").write_text(resume.full_text)
         (out_dir / "cover_letter.txt").write_text(cover.content)
+
+        # Verify PDFs were created
+        if not resume_path.exists():
+            raise Exception(f"Failed to create resume PDF at {resume_path}")
+        print(f"[Process] Resume PDF created: {resume_path} ({resume_path.stat().st_size} bytes)", flush=True)
+
         app_record.status = ApplicationStatus.PDF_GENERATED
 
     except Exception as e:
@@ -732,6 +740,15 @@ def process_jobs():
             # Use stored filenames from the app_record
             resume_file = app_record.resume_filename or "resume.pdf"
             cover_file = app_record.cover_letter_filename or "cover_letter.pdf"
+
+            # Generate skills comparison matrix
+            skills_comparison = None
+            if jd:
+                # Parse resume to get base skills
+                base_resume = parse_resume_from_text(resume_text)
+                analyzer = JobAnalyzer()
+                skills_comparison = analyzer.generate_skills_comparison(jd, base_resume.skills)
+
             result = {
                 'id': app_record.id,
                 'url': url,
@@ -762,7 +779,9 @@ def process_jobs():
                 'resume_text': app_record.tailored_resume.full_text if app_record.tailored_resume else None,
                 'cover_letter_text': app_record.cover_letter.content if app_record.cover_letter else None,
                 # Cached indicator
-                'cached': getattr(app_record, 'cached', False)
+                'cached': getattr(app_record, 'cached', False),
+                # Skills comparison matrix
+                'skills_comparison': skills_comparison
             }
             results.append(result)
         except Exception as e:
@@ -1176,14 +1195,39 @@ def apply_to_job(app_id):
         if not app_record.output_dir or not app_record.resume_filename:
             return json_response({'success': False, 'error': 'No resume generated for this application'}, 400)
 
-        resume_pdf_path = Path(app_record.output_dir) / app_record.resume_filename
+        # Resolve output directory - handle both relative and absolute paths
+        output_dir = Path(app_record.output_dir)
+        if not output_dir.is_absolute():
+            # Try relative to current working directory first
+            output_dir = Path.cwd() / output_dir
+
+        resume_pdf_path = output_dir / app_record.resume_filename
+
+        # Debug: log the path being checked
+        print(f"[AutoApply] Checking resume PDF at: {resume_pdf_path}", flush=True)
+        print(f"[AutoApply] Output dir exists: {output_dir.exists()}", flush=True)
+        print(f"[AutoApply] Resume PDF exists: {resume_pdf_path.exists()}", flush=True)
+
         if not resume_pdf_path.exists():
-            return json_response({'success': False, 'error': 'Resume PDF not found'}, 400)
+            # List files in output dir for debugging
+            if output_dir.exists():
+                files = list(output_dir.iterdir())
+                print(f"[AutoApply] Files in output dir: {files}", flush=True)
+            return json_response({
+                'success': False,
+                'error': f'Resume PDF not found at: {resume_pdf_path}',
+                'debug': {
+                    'output_dir': str(output_dir),
+                    'resume_filename': app_record.resume_filename,
+                    'output_dir_exists': output_dir.exists()
+                }
+            }, 400)
 
         cover_letter_path = None
         if app_record.cover_letter_filename:
-            cover_letter_path = Path(app_record.output_dir) / app_record.cover_letter_filename
+            cover_letter_path = output_dir / app_record.cover_letter_filename
             if not cover_letter_path.exists():
+                print(f"[AutoApply] Cover letter not found at: {cover_letter_path}", flush=True)
                 cover_letter_path = None
 
         # Get flags from request - default to fully automated

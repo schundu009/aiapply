@@ -279,6 +279,124 @@ Rules:
             freshness_assessment=freshness_assessment,
         )
 
+    def generate_skills_comparison(self, job: JobDescription, resume_skills: list[str]) -> dict:
+        """Generate a comparison matrix between job requirements and resume skills.
+
+        Returns a dict with:
+        - required_skills: list of {skill, has_skill, match_type}
+        - preferred_skills: list of {skill, has_skill, match_type}
+        - technologies: list of {skill, has_skill, match_type}
+        - summary: {total_required, matched_required, total_preferred, matched_preferred, total_tech, matched_tech}
+        """
+        # Normalize resume skills for matching (lowercase, stripped)
+        resume_skills_lower = {s.lower().strip() for s in resume_skills}
+        resume_skills_text = " ".join(resume_skills).lower()
+
+        def check_skill_match(skill: str) -> tuple[bool, str]:
+            """Check if resume contains this skill and return match type."""
+            skill_lower = skill.lower().strip()
+
+            # Exact match
+            if skill_lower in resume_skills_lower:
+                return True, "exact"
+
+            # Check for common variations/abbreviations
+            variations = {
+                "javascript": ["js", "javascript", "node.js", "nodejs"],
+                "typescript": ["ts", "typescript"],
+                "kubernetes": ["k8s", "kubernetes"],
+                "postgresql": ["postgres", "postgresql", "psql"],
+                "amazon web services": ["aws", "amazon web services"],
+                "google cloud": ["gcp", "google cloud", "google cloud platform"],
+                "microsoft azure": ["azure", "microsoft azure"],
+                "ci/cd": ["ci/cd", "cicd", "ci cd", "continuous integration", "continuous deployment"],
+                "docker": ["docker", "containerization", "containers"],
+                "react": ["react", "react.js", "reactjs"],
+                "vue": ["vue", "vue.js", "vuejs"],
+                "angular": ["angular", "angularjs"],
+                "machine learning": ["ml", "machine learning"],
+                "artificial intelligence": ["ai", "artificial intelligence"],
+                "rest api": ["rest", "rest api", "restful", "api"],
+                "sql": ["sql", "mysql", "postgresql", "mssql", "oracle"],
+                "nosql": ["nosql", "mongodb", "dynamodb", "cassandra", "redis"],
+                "python": ["python", "py"],
+                "java": ["java", "jvm"],
+                "c++": ["c++", "cpp"],
+                "c#": ["c#", "csharp", ".net"],
+            }
+
+            # Check if skill matches any variation
+            for base_skill, var_list in variations.items():
+                if skill_lower in var_list or any(v in skill_lower for v in var_list):
+                    if any(v in resume_skills_text for v in var_list):
+                        return True, "variation"
+
+            # Partial/substring match
+            for resume_skill in resume_skills_lower:
+                if skill_lower in resume_skill or resume_skill in skill_lower:
+                    return True, "partial"
+
+            # Word-level match (e.g., "AWS EC2" matches if "AWS" and "EC2" are separately in resume)
+            skill_words = skill_lower.split()
+            if len(skill_words) > 1:
+                matches = sum(1 for w in skill_words if w in resume_skills_text)
+                if matches >= len(skill_words) * 0.6:  # 60% of words match
+                    return True, "partial"
+
+            return False, "none"
+
+        # Process required skills
+        required_comparison = []
+        for skill in (job.required_skills or []):
+            has_skill, match_type = check_skill_match(skill)
+            required_comparison.append({
+                "skill": skill,
+                "has_skill": has_skill,
+                "match_type": match_type
+            })
+
+        # Process preferred skills
+        preferred_comparison = []
+        for skill in (job.preferred_skills or []):
+            has_skill, match_type = check_skill_match(skill)
+            preferred_comparison.append({
+                "skill": skill,
+                "has_skill": has_skill,
+                "match_type": match_type
+            })
+
+        # Process technologies
+        tech_comparison = []
+        for tech in (job.technologies or []):
+            has_skill, match_type = check_skill_match(tech)
+            tech_comparison.append({
+                "skill": tech,
+                "has_skill": has_skill,
+                "match_type": match_type
+            })
+
+        # Calculate summary stats
+        matched_required = sum(1 for s in required_comparison if s["has_skill"])
+        matched_preferred = sum(1 for s in preferred_comparison if s["has_skill"])
+        matched_tech = sum(1 for s in tech_comparison if s["has_skill"])
+
+        return {
+            "required_skills": required_comparison,
+            "preferred_skills": preferred_comparison,
+            "technologies": tech_comparison,
+            "summary": {
+                "total_required": len(required_comparison),
+                "matched_required": matched_required,
+                "required_percent": round(matched_required / len(required_comparison) * 100, 1) if required_comparison else 0,
+                "total_preferred": len(preferred_comparison),
+                "matched_preferred": matched_preferred,
+                "preferred_percent": round(matched_preferred / len(preferred_comparison) * 100, 1) if preferred_comparison else 0,
+                "total_tech": len(tech_comparison),
+                "matched_tech": matched_tech,
+                "tech_percent": round(matched_tech / len(tech_comparison) * 100, 1) if tech_comparison else 0,
+            }
+        }
+
     async def generate_next_steps(self, application: Application) -> list[str]:
         """Generate AI-powered next steps for a job application."""
         jd = application.job_description

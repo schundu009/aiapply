@@ -288,8 +288,59 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 ` : ''}
                                 ${result.required_skills && result.required_skills.length > 0 ? `
                                     <div style="margin: 8px 0; font-size: 13px; line-height: 1.6;">
-                                        <strong style="color: #555;">Skills:</strong>
-                                        <span style="color: #333;">${result.required_skills.join(', ')}</span>
+                                        <strong style="color: var(--text-muted);">Skills:</strong>
+                                        <span style="color: var(--text-secondary);">${result.required_skills.join(', ')}</span>
+                                    </div>
+                                ` : ''}
+                                ${result.skills_comparison ? `
+                                    <div class="skills-comparison" style="margin: 16px 0;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                            <strong style="color: var(--text-primary); font-size: 13px;">Skills Match Analysis</strong>
+                                            <div style="display: flex; gap: 12px; font-size: 11px;">
+                                                ${result.skills_comparison.summary.total_required > 0 ? `
+                                                    <span style="color: var(--text-secondary);">
+                                                        Required: <strong style="color: ${result.skills_comparison.summary.required_percent >= 70 ? 'var(--success)' : result.skills_comparison.summary.required_percent >= 50 ? 'var(--warning)' : 'var(--error)'}">${result.skills_comparison.summary.matched_required}/${result.skills_comparison.summary.total_required}</strong>
+                                                        (${result.skills_comparison.summary.required_percent}%)
+                                                    </span>
+                                                ` : ''}
+                                                ${result.skills_comparison.summary.total_tech > 0 ? `
+                                                    <span style="color: var(--text-secondary);">
+                                                        Tech: <strong style="color: ${result.skills_comparison.summary.tech_percent >= 70 ? 'var(--success)' : result.skills_comparison.summary.tech_percent >= 50 ? 'var(--warning)' : 'var(--error)'}">${result.skills_comparison.summary.matched_tech}/${result.skills_comparison.summary.total_tech}</strong>
+                                                        (${result.skills_comparison.summary.tech_percent}%)
+                                                    </span>
+                                                ` : ''}
+                                            </div>
+                                        </div>
+                                        <div style="border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden;">
+                                            <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                                                <thead>
+                                                    <tr style="background: var(--bg-tertiary);">
+                                                        <th style="text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-weight: 600; font-size: 10px; text-transform: uppercase;">Skill/Technology</th>
+                                                        <th style="text-align: center; padding: 8px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-weight: 600; font-size: 10px; text-transform: uppercase; width: 80px;">Category</th>
+                                                        <th style="text-align: center; padding: 8px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-weight: 600; font-size: 10px; text-transform: uppercase; width: 80px;">Match</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    ${[
+                                                        ...(result.skills_comparison.required_skills || []).map(s => ({...s, category: 'Required'})),
+                                                        ...(result.skills_comparison.technologies || []).map(s => ({...s, category: 'Tech'})),
+                                                        ...(result.skills_comparison.preferred_skills || []).map(s => ({...s, category: 'Preferred'}))
+                                                    ].map(s => `
+                                                        <tr style="border-bottom: 1px solid var(--border-color);">
+                                                            <td style="padding: 6px 12px; color: var(--text-secondary);">${s.skill}</td>
+                                                            <td style="text-align: center; padding: 6px 12px;">
+                                                                <span style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: ${s.category === 'Required' ? 'rgba(239, 68, 68, 0.15)' : s.category === 'Tech' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(167, 139, 250, 0.15)'}; color: ${s.category === 'Required' ? '#ef4444' : s.category === 'Tech' ? '#3b82f6' : 'var(--purple-medium)'};">${s.category}</span>
+                                                            </td>
+                                                            <td style="text-align: center; padding: 6px 12px;">
+                                                                ${s.has_skill
+                                                                    ? '<span style="color: var(--success); font-weight: 600;">&#10003;</span>'
+                                                                    : '<span style="color: var(--error); opacity: 0.6;">&#10007;</span>'}
+                                                            </td>
+                                                        </tr>
+                                                    `).join('')}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     </div>
                                 ` : ''}
                                 ${result.freshness_warning ? `<div class="alert alert-warning" style="margin: 8px 0; padding: 8px 12px; font-size: 13px;">${result.freshness_warning}</div>` : ''}
