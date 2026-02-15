@@ -478,16 +478,27 @@ def extract_text_from_file(file):
     return file_bytes.decode('utf-8', errors='ignore')
 
 
-def get_resume_text():
-    global default_resume_filename
-    # Use selected default uploaded resume if available
+def get_resume_text(session_id='default'):
+    global default_resume_filename, _external_resume_text
+
+    # Priority 1: Check for externally provided resume (from jobportal)
+    if session_id in _external_resume_text:
+        return _external_resume_text[session_id]['text']
+
+    # Priority 2: Use selected default uploaded resume if available
     if default_resume_filename and default_resume_filename in uploaded_resumes:
         return uploaded_resumes[default_resume_filename]['text']
-    # Fall back to resume.txt
+
+    # Priority 3: Fall back to resume.txt
     resume_path = Path("resume.txt")
     if resume_path.exists():
         return resume_path.read_text()
+
     return ""
+
+
+# Initialize external resume storage
+_external_resume_text = {}
 
 
 def gen_id(url):
@@ -592,6 +603,50 @@ def documents_status():
         'default_resume': default_resume_filename,
         'resume_count': len(uploaded_resumes),
         'cover_letter_count': len(uploaded_cover_letters)
+    })
+
+
+# Temporary storage for externally provided resumes (from jobportal)
+_external_resume_text = {}
+
+
+@app.route('/api/resume/external', methods=['POST'])
+def set_external_resume():
+    """Accept resume text from external source (e.g., jobportal).
+
+    This allows the jobportal to pass resume text to autoapply
+    without requiring users to upload separately to both services.
+    """
+    global _external_resume_text
+    data = request.get_json()
+    resume_text = data.get('resume_text', '')
+    session_id = data.get('session_id', 'default')
+
+    if not resume_text:
+        return jsonify({'error': 'No resume text provided'}), 400
+
+    _external_resume_text[session_id] = {
+        'text': resume_text,
+        'timestamp': datetime.now().isoformat(),
+        'source': 'jobportal'
+    }
+
+    return jsonify({
+        'success': True,
+        'session_id': session_id,
+        'message': 'Resume text stored for this session'
+    })
+
+
+@app.route('/api/resume/external/<session_id>', methods=['GET'])
+def get_external_resume(session_id):
+    """Get externally provided resume text."""
+    if session_id not in _external_resume_text:
+        return jsonify({'error': 'No external resume found for this session'}), 404
+
+    return jsonify({
+        'resume_text': _external_resume_text[session_id]['text'],
+        'source': _external_resume_text[session_id]['source']
     })
 
 
