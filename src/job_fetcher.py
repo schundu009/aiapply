@@ -14,6 +14,7 @@ class JobFetcher:
         ATSPlatform.LEVER: [r"lever\.co", r"jobs\.lever\.co"],
         ATSPlatform.WORKDAY: [r"myworkdayjobs\.com", r"\.wd\d+\.myworkdayjobs\.com", r"workday\.com"],
         ATSPlatform.ASHBY: [r"ashbyhq\.com", r"jobs\.ashbyhq\.com"],
+        ATSPlatform.EIGHTFOLD: [r"eightfold\.ai", r"\.eightfold\.ai"],
         ATSPlatform.ICIMS: [r"icims\.com", r"jobs\.icims\.com", r"careers-.*\.icims\.com"],
         ATSPlatform.TALEO: [r"taleo\.net", r"taleo\.com", r"oracle.*taleo"],
         ATSPlatform.SMARTRECRUITERS: [r"smartrecruiters\.com", r"jobs\.smartrecruiters\.com"],

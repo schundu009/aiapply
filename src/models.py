@@ -17,6 +17,7 @@ class ATSPlatform(str, Enum):
     BAMBOOHR = "bamboohr"
     BREEZYHR = "breezyhr"
     JAZZ = "jazz"
+    EIGHTFOLD = "eightfold"
     UNKNOWN = "unknown"
 
 class JobDescription(BaseModel):

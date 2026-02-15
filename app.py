@@ -582,6 +582,19 @@ def documents():
                          active_page='documents')
 
 
+@app.route('/api/documents/status')
+def documents_status():
+    """API endpoint to check document upload status."""
+    resume_ready = bool(get_resume_text())
+    return jsonify({
+        'resume_uploaded': bool(uploaded_resumes),
+        'resume_ready': resume_ready,
+        'default_resume': default_resume_filename,
+        'resume_count': len(uploaded_resumes),
+        'cover_letter_count': len(uploaded_cover_letters)
+    })
+
+
 @app.route('/profile')
 def profile():
     info = load_personal_info()

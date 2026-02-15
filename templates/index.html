@@ -5,6 +5,11 @@
     <h2>Job Applications</h2>
 </div>
 
+<div id="resume-warning" class="alert alert-warning" style="display: none; margin-bottom: 20px; padding: 16px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; color: #92400e;">
+    <strong>⚠️ No Resume Uploaded</strong><br>
+    Please <a href="/documents" style="color: #92400e; font-weight: 600; text-decoration: underline;">upload your resume</a> first before processing job applications.
+</div>
+
 <div class="stats-grid">
     <div class="stat-card">
         <div class="stat-label">Total</div>
@@ -72,7 +77,18 @@
 {% endblock %}
 
 {% block scripts %}
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
+    // Check resume status and show warning if needed
+    try {
+        const docStatus = await fetch('/api/documents/status').then(r => r.json());
+        const warning = document.getElementById('resume-warning');
+        if (!docStatus.resume_ready && warning) {
+            warning.style.display = 'block';
+        }
+    } catch (e) {
+        console.error('Failed to check document status:', e);
+    }
+
     const modeRadios = document.querySelectorAll('input[name="input_mode"]');
     const singleInput = document.getElementById('single-input');
     const batchInput = document.getElementById('batch-input');
@@ -124,6 +140,17 @@ document.addEventListener('DOMContentLoaded', function() {
         if (urls.length === 0) {
             alert('Please enter at least one job URL');
             return;
+        }
+
+        // Check if resume is uploaded before processing
+        try {
+            const docStatus = await fetch('/api/documents/status').then(r => r.json());
+            if (!docStatus.resume_ready) {
+                alert('⚠️ Please upload a resume first!\n\nGo to Documents → Upload Resume before processing jobs.');
+                return;
+            }
+        } catch (e) {
+            console.error('Failed to check document status:', e);
         }
 
         submitBtn.disabled = true;
