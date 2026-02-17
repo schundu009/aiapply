@@ -1,5 +1,5 @@
 /* ============================================
-   AutoApply - Cariara Purple Design System
+   AutoApply - Cariara Teal Design System
    Unified with Cariara Jobs Portal
    ============================================ */
 
@@ -13,36 +13,36 @@
 }
 
 :root {
-    /* Background Colors - Dark purple/navy (matching Cariara) */
-    --bg-primary: #0a0612;
-    --bg-secondary: #110d1a;
-    --bg-tertiary: #1a1425;
-    --bg-card: #110d1a;
-    --bg-hover: #1f1730;
-    --bg-elevated: #150f20;
-    --bg-white: #1a1425;
-    --bg-subtle: #1f1730;
-    --bg-muted: #2a2040;
+    /* Background Colors - Dark slate (matching Cariara Jobs) */
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-tertiary: #334155;
+    --bg-card: #1e293b;
+    --bg-hover: #334155;
+    --bg-elevated: #1e293b;
+    --bg-white: #1e293b;
+    --bg-subtle: #1e293b;
+    --bg-muted: #334155;
 
-    /* Text Colors - White to purple-grey */
-    --text-primary: #ffffff;
-    --text-secondary: #b8b0c8;
-    --text-tertiary: #8a8098;
-    --text-muted: #6b6080;
+    /* Text Colors - Light slate */
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-tertiary: #94a3b8;
+    --text-muted: #64748b;
 
-    /* Border Colors - Purple tinted */
-    --border-color: #2d2540;
-    --border-light: #3d3355;
-    --border-default: #2d2540;
-    --border-subtle: #1f1730;
+    /* Border Colors - Dark slate */
+    --border-color: #334155;
+    --border-light: #475569;
+    --border-default: #334155;
+    --border-subtle: #1e293b;
 
-    /* Purple accent colors */
-    --accent-primary: #a78bfa;
-    --accent-hover: #c4b5fd;
-    --accent-gradient: linear-gradient(135deg, #c4b5fd 0%, #a78bfa 50%, #7c3aed 100%);
-    --purple-light: #c4b5fd;
-    --purple-medium: #a78bfa;
-    --purple-deep: #7c3aed;
+    /* Teal accent colors */
+    --accent-primary: #2dd4bf;
+    --accent-hover: #5eead4;
+    --accent-gradient: linear-gradient(135deg, #5eead4 0%, #2dd4bf 50%, #14b8a6 100%);
+    --purple-light: #5eead4;
+    --purple-medium: #2dd4bf;
+    --purple-deep: #14b8a6;
 
     /* Status colors */
     --success: #22c55e;
