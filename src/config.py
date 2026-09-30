@@ -44,7 +44,7 @@ class Settings(BaseSettings):
 
     @property
     def is_postgres(self) -> bool:
-        return bool(self.database_url) and "postgresql" in self.database_url
+        return bool(self.database_url) and self.database_url.startswith(("postgres://", "postgresql"))
 
     @property
     def use_database(self) -> bool:

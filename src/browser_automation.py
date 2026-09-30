@@ -11,6 +11,7 @@ from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 from .config import settings
 from .models import Application, ApplicationStatus, ATSPlatform, BaseResume
 from .form_agent import FormAgent
+from .profile_store import strip_credentials
 
 
 class AutoApplyProgress:
@@ -20,7 +21,7 @@ class AutoApplyProgress:
         ('navigate', 'Navigating to job page'),
         ('apply', 'Clicking Apply button'),
         ('modal', 'Handling application options'),
-        ('login', 'Signing in'),
+        ('login', 'Sign-in check'),
         ('form', 'Navigating form steps'),
         ('fill', 'Filling form fields'),
         ('upload', 'Uploading resume'),
@@ -124,29 +125,17 @@ class AutoApplyResult:
 class BrowserAutomation:
     """Automates job application form filling and submission using Playwright."""
 
-    # Path to save browser session state for reuse
-    SESSION_STATE_PATH = Path("data/browser_state.json")
-
     def __init__(self, headless: bool = True, personal_info: Optional[Dict] = None):
         self.headless = headless if headless is not None else True  # Default to headless
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
         self.playwright = None
-        self.personal_info = personal_info or {}
+        self.personal_info = strip_credentials(personal_info or {})
         self.form_agent: Optional[FormAgent] = None
         self.missing_fields: List[Dict] = []
         self.max_retries = 3
-
-    async def save_session_state(self):
-        """Save browser session state (cookies, storage) for reuse."""
-        if self.context:
-            try:
-                state = await self.context.storage_state()
-                self.SESSION_STATE_PATH.parent.mkdir(exist_ok=True)
-                self.SESSION_STATE_PATH.write_text(json.dumps(state, indent=2))
-                print("Browser session saved")
-            except Exception as e:
-                print(f"Could not save session state: {e}")
+        # Set when a site requires signing in; the user must do that manually.
+        self.signin_required = False
 
     def _init_form_agent(self):
         """Initialize the form agent if not already initialized."""
@@ -158,58 +147,20 @@ class BrowserAutomation:
                 self.form_agent = None
 
     async def start(self):
-        """Start the browser with anti-detection settings."""
-        import subprocess
+        """Start a standard Playwright Chromium browser.
 
+        No fingerprint spoofing, automation-flag hiding, location spoofing or
+        artificial "human-like" slowdowns: sites see an ordinary automated
+        browser and any CAPTCHA is left for the user to complete.
+        """
         self.playwright = await async_playwright().start()
-
-        # Get actual screen size on macOS
-        try:
-            result = subprocess.run(
-                ["osascript", "-e", "tell application \"Finder\" to get bounds of window of desktop"],
-                capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                bounds = result.stdout.strip().split(", ")
-                screen_width = int(bounds[2])
-                screen_height = int(bounds[3])
-            else:
-                screen_width, screen_height = 1920, 1080
-        except Exception:
-            screen_width, screen_height = 1920, 1080
-
-        # Calculate 80% of screen size
-        width = int(screen_width * 0.8)
-        height = int(screen_height * 0.8)
-
-        # Center the window
-        pos_x = int((screen_width - width) / 2)
-        pos_y = int((screen_height - height) / 2)
-
-        # Launch with anti-detection flags
+        width, height = 1440, 900
         self.browser = await self.playwright.chromium.launch(
             headless=self.headless,
-            slow_mo=150,  # Slightly slower for more human-like behavior
-            args=[
-                f'--window-size={width},{height}',
-                f'--window-position={pos_x},{pos_y}',
-                '--disable-blink-features=AutomationControlled',
-                '--disable-infobars',
-                '--no-first-run',
-                '--no-default-browser-check',
-            ] if not self.headless else [
-                '--disable-blink-features=AutomationControlled',
-            ],
+            args=[f'--window-size={width},{height}'] if not self.headless else [],
         )
-
-        # Create context with realistic settings to reduce CAPTCHA triggers
         self.context = await self.browser.new_context(
             viewport={"width": width, "height": height},
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            locale="en-US",
-            timezone_id="America/Los_Angeles",
-            geolocation={"latitude": 37.3861, "longitude": -122.0839},  # San Jose area
-            permissions=["geolocation"],
         )
 
     async def stop(self):
@@ -221,85 +172,22 @@ class BrowserAutomation:
         if self.playwright:
             await self.playwright.stop()
 
-    async def handle_google_login(self, page: Page) -> bool:
-        """Handle Google OAuth login if required."""
-        try:
-            # Check if Google login is needed
-            google_btn = page.locator("button:has-text('Sign in with Google'), a:has-text('Google'), [data-provider='google']")
-            if await google_btn.count() > 0 and await google_btn.first.is_visible():
-                email = self.personal_info.get('google_email', '')
-                password = self.personal_info.get('google_password', '')
-
-                if not email or not password:
-                    return False
-
-                await google_btn.first.click()
-                await page.wait_for_load_state("networkidle")
-                await asyncio.sleep(2)
-
-                # Fill Google email
-                email_input = page.locator("input[type='email']")
-                if await email_input.count() > 0:
-                    await email_input.first.fill(email)
-                    await page.locator("button:has-text('Next'), #identifierNext").click()
-                    await asyncio.sleep(3)
-
-                # Fill Google password
-                password_input = page.locator("input[type='password']")
-                if await password_input.count() > 0:
-                    await password_input.first.fill(password)
-                    await page.locator("button:has-text('Next'), #passwordNext").click()
-                    await page.wait_for_load_state("networkidle")
-                    await asyncio.sleep(3)
-
-                return True
-        except Exception as e:
-            print(f"Google login failed: {e}")
-        return False
-
-    async def handle_linkedin_login(self, page: Page) -> bool:
-        """Handle LinkedIn login if required."""
-        try:
-            linkedin_btn = page.locator("button:has-text('Sign in with LinkedIn'), a:has-text('LinkedIn'), [class*='linkedin']")
-            if await linkedin_btn.count() > 0 and await linkedin_btn.first.is_visible():
-                email = self.personal_info.get('linkedin_email', '')
-                password = self.personal_info.get('linkedin_password', '')
-
-                if not email or not password:
-                    return False
-
-                await linkedin_btn.first.click()
-                await page.wait_for_load_state("networkidle")
-                await asyncio.sleep(2)
-
-                # Fill LinkedIn credentials
-                await page.locator("input#username, input[name='session_key']").fill(email)
-                await page.locator("input#password, input[name='session_password']").fill(password)
-                await page.locator("button[type='submit'], button:has-text('Sign in')").click()
-                await page.wait_for_load_state("networkidle")
-                await asyncio.sleep(3)
-
-                return True
-        except Exception as e:
-            print(f"LinkedIn login failed: {e}")
-        return False
-
     async def handle_login_if_required(self, page: Page) -> bool:
-        """Check if login is required. Does NOT automatically login - just detects."""
+        """Detect a sign-in wall. Returns True when the user must sign in manually.
+
+        AutoApply never logs in, never creates accounts and never stores
+        passwords; it only reports that manual sign-in is needed.
+        """
         try:
-            # Check for common login patterns
             login_indicators = [
                 "form[action*='login']",
+                "form[action*='signin']",
                 "[data-automation-id='loginForm']",
-                "input[type='password']",
+                "input[type='password']:visible",
             ]
-
             for selector in login_indicators:
                 if await page.locator(selector).count() > 0:
-                    # Login form detected but we don't auto-login
-                    # Just return False to indicate manual login needed
-                    return False
-
+                    return True
             return False
         except Exception:
             return False
@@ -343,7 +231,7 @@ class BrowserAutomation:
                 'phone': resume.phone,
                 'linkedin': resume.linkedin or '',
                 'location': resume.location or '',
-                **self.personal_info
+                **strip_credentials(self.personal_info)
             }
 
             for field in fields:
@@ -360,8 +248,11 @@ class BrowserAutomation:
                 if not value and field.get('required'):
                     # Try using LLM to generate a value
                     options = field.get('options', [])
+                    # Only free-text questions are drafted by the LLM; factual,
+                    # legal, consent and EEO questions stay blank for the user.
                     value = await self.form_agent.get_field_value_with_llm(
-                        label, field_type, options, personal_info, resume_text
+                        label, field_type, options, personal_info, resume_text,
+                        job_description=job_description,
                     )
 
                 if value:
@@ -435,416 +326,8 @@ class BrowserAutomation:
         return self.missing_fields
 
     def update_personal_info(self, new_info: Dict):
-        """Update personal info for retrying form fill."""
-        self.personal_info.update(new_info)
-
-    async def create_job_board_accounts(self, platforms: List[str] = None, log_callback=None) -> Dict[str, Any]:
-        """
-        Create accounts on major job boards automatically.
-        Returns dict with created credentials for each platform.
-
-        Args:
-            platforms: List of platform names to create accounts for
-            log_callback: Optional callback function to receive log messages
-        """
-        def log(message: str):
-            if log_callback:
-                log_callback(message)
-            print(f"[AccountCreation] {message}")
-
-        log("Starting job board account creation process...")
-
-        if not self.browser:
-            log("Launching browser...")
-            await self.start()
-            log("Browser launched successfully")
-
-        results = {}
-        logs = []
-
-        email = self.personal_info.get('email', '')
-        password = self.personal_info.get('default_job_password', 'AutoApply2024!')
-        first_name = self.personal_info.get('first_name', '')
-        last_name = self.personal_info.get('last_name', '')
-
-        log(f"Using email: {email[:3]}***@{email.split('@')[-1] if '@' in email else '***'}")
-        log(f"User: {first_name} {last_name}")
-
-        if not email or not first_name or not last_name:
-            error_msg = "Missing required personal info (email, first_name, last_name)"
-            log(f"ERROR: {error_msg}")
-            return {"error": error_msg, "logs": [error_msg]}
-
-        # Default to all platforms if none specified
-        if platforms is None:
-            platforms = ['greenhouse', 'lever', 'ashby', 'workday', 'smartrecruiters', 'jobvite', 'icims', 'taleo', 'bamboohr']
-
-        log(f"Platforms to process: {', '.join(platforms)}")
-        logs.append(f"Processing {len(platforms)} platforms")
-
-        for i, platform in enumerate(platforms, 1):
-            log(f"\n[{i}/{len(platforms)}] Processing {platform.upper()}...")
-            logs.append(f"[{i}/{len(platforms)}] {platform.upper()}")
-
-            try:
-                if platform == 'greenhouse':
-                    result = await self._create_greenhouse_account(email, password, first_name, last_name, log)
-                elif platform == 'lever':
-                    result = await self._create_lever_account(email, password, first_name, last_name, log)
-                elif platform == 'ashby':
-                    result = await self._create_ashby_account(email, password, first_name, last_name, log)
-                elif platform == 'workday':
-                    result = await self._create_workday_account(email, password, first_name, last_name, log)
-                elif platform == 'smartrecruiters':
-                    result = await self._create_smartrecruiters_account(email, password, first_name, last_name, log)
-                elif platform == 'jobvite':
-                    result = await self._create_jobvite_account(email, password, first_name, last_name, log)
-                elif platform == 'icims':
-                    result = await self._create_icims_account(email, password, first_name, last_name, log)
-                elif platform == 'taleo':
-                    result = await self._create_taleo_account(email, password, first_name, last_name, log)
-                elif platform == 'bamboohr':
-                    result = await self._create_bamboohr_account(email, password, first_name, last_name, log)
-                else:
-                    result = {"success": False, "error": f"Unknown platform: {platform}"}
-                    log(f"  ERROR: Unknown platform")
-
-                result['logs'] = result.get('logs', [])
-                results[platform] = result
-
-                status = "✓ Success" if result.get('success') else "✗ Failed"
-                log(f"  {status}: {result.get('message', result.get('error', 'No message'))}")
-                logs.append(f"  {status}: {result.get('message', result.get('error', ''))[:50]}")
-
-            except Exception as e:
-                error_msg = str(e)
-                log(f"  ERROR: {error_msg}")
-                logs.append(f"  ERROR: {error_msg[:50]}")
-                results[platform] = {"success": False, "error": error_msg, "logs": [error_msg]}
-
-        log(f"\nAccount creation complete. Processed {len(platforms)} platforms.")
-        return {"results": results, "logs": logs}
-
-    async def _create_greenhouse_account(self, email: str, password: str, first_name: str, last_name: str, log=None) -> Dict:
-        """Greenhouse typically doesn't require account creation - forms are public."""
-        logs = []
-        def _log(msg):
-            logs.append(msg)
-            if log:
-                log(f"  {msg}")
-
-        _log("Checking Greenhouse requirements...")
-        _log("Greenhouse uses public application forms")
-        _log("No account creation needed - forms accept direct applications")
-        _log("Storing email for form auto-fill")
-
-        return {
-            "success": True,
-            "message": "Public forms - no account needed",
-            "email": email,
-            "password": None,
-            "logs": logs
-        }
-
-    async def _create_lever_account(self, email: str, password: str, first_name: str, last_name: str, log=None) -> Dict:
-        """Lever typically doesn't require account creation - forms are public."""
-        logs = []
-        def _log(msg):
-            logs.append(msg)
-            if log:
-                log(f"  {msg}")
-
-        _log("Checking Lever requirements...")
-        _log("Lever uses public application forms")
-        _log("No account creation needed - forms accept direct applications")
-        _log("Storing email for form auto-fill")
-
-        return {
-            "success": True,
-            "message": "Public forms - no account needed",
-            "email": email,
-            "password": None,
-            "logs": logs
-        }
-
-    async def _create_ashby_account(self, email: str, password: str, first_name: str, last_name: str, log=None) -> Dict:
-        """Ashby typically doesn't require account creation - forms are public."""
-        logs = []
-        def _log(msg):
-            logs.append(msg)
-            if log:
-                log(f"  {msg}")
-
-        _log("Checking Ashby requirements...")
-        _log("Ashby uses public application forms")
-        _log("No account creation needed - forms accept direct applications")
-        _log("Storing email for form auto-fill")
-
-        return {
-            "success": True,
-            "message": "Public forms - no account needed",
-            "email": email,
-            "password": None,
-            "logs": logs
-        }
-
-    async def _create_workday_account(self, email: str, password: str, first_name: str, last_name: str, log=None) -> Dict:
-        """Create Workday candidate account."""
-        logs = []
-        def _log(msg):
-            logs.append(msg)
-            if log:
-                log(f"  {msg}")
-
-        _log("Checking Workday requirements...")
-        _log("Workday uses company-specific career sites")
-        _log("Each company has its own Workday instance (e.g., company.wd5.myworkdayjobs.com)")
-        _log("Account will be created automatically during first application")
-        _log("Storing credentials for auto-fill: " + email[:3] + "***")
-        _log("Password stored securely for auto-signup")
-
-        return {
-            "success": True,
-            "message": "Company-specific - credentials stored for auto-signup",
-            "email": email,
-            "password": password,
-            "logs": logs
-        }
-
-    async def _create_smartrecruiters_account(self, email: str, password: str, first_name: str, last_name: str, log=None) -> Dict:
-        """Create SmartRecruiters account."""
-        logs = []
-        def _log(msg):
-            logs.append(msg)
-            if log:
-                log(f"  {msg}")
-
-        page = await self.context.new_page()
-        try:
-            _log("Opening SmartRecruiters signup page...")
-            await page.goto("https://www.smartrecruiters.com/account/sign-up", wait_until="networkidle")
-            await asyncio.sleep(2)
-
-            _log("Looking for signup form...")
-
-            # Fill signup form if available
-            email_field = page.locator("input[type='email'], input[name='email']")
-            if await email_field.count() > 0:
-                _log(f"Filling email: {email[:3]}***")
-                await email_field.first.fill(email)
-            else:
-                _log("Email field not found - may require company-specific signup")
-
-            password_field = page.locator("input[type='password'], input[name='password']")
-            if await password_field.count() > 0:
-                _log("Filling password...")
-                await password_field.first.fill(password)
-
-            first_field = page.locator("input[name*='first'], input[placeholder*='First']")
-            if await first_field.count() > 0:
-                _log(f"Filling first name: {first_name}")
-                await first_field.first.fill(first_name)
-
-            last_field = page.locator("input[name*='last'], input[placeholder*='Last']")
-            if await last_field.count() > 0:
-                _log(f"Filling last name: {last_name}")
-                await last_field.first.fill(last_name)
-
-            # Submit
-            submit = page.locator("button[type='submit'], button:has-text('Sign up'), button:has-text('Create')")
-            if await submit.count() > 0:
-                _log("Submitting signup form...")
-                await submit.first.click()
-                await asyncio.sleep(3)
-                _log("Signup submitted - check email for verification")
-            else:
-                _log("Submit button not found - storing credentials for manual signup")
-
-            return {
-                "success": True,
-                "email": email,
-                "password": password,
-                "message": "Account creation attempted",
-                "logs": logs
-            }
-        except Exception as e:
-            _log(f"Error: {str(e)}")
-            return {"success": False, "error": str(e), "logs": logs}
-        finally:
-            await page.close()
-
-    async def _create_jobvite_account(self, email: str, password: str, first_name: str, last_name: str, log=None) -> Dict:
-        """Jobvite accounts are company-specific."""
-        logs = []
-        def _log(msg):
-            logs.append(msg)
-            if log:
-                log(f"  {msg}")
-
-        _log("Checking Jobvite requirements...")
-        _log("Jobvite uses company-specific career portals")
-        _log("Each company has its own Jobvite instance")
-        _log("Account will be created during first application")
-        _log("Storing credentials for auto-fill")
-
-        return {
-            "success": True,
-            "message": "Company-specific - credentials stored",
-            "email": email,
-            "password": password,
-            "logs": logs
-        }
-
-    async def _create_icims_account(self, email: str, password: str, first_name: str, last_name: str, log=None) -> Dict:
-        """iCIMS accounts are company-specific."""
-        logs = []
-        def _log(msg):
-            logs.append(msg)
-            if log:
-                log(f"  {msg}")
-
-        _log("Checking iCIMS requirements...")
-        _log("iCIMS uses company-specific career portals")
-        _log("Each company has unique iCIMS instance (careers.company.icims.com)")
-        _log("Account will be created during first application")
-        _log("Storing credentials for auto-signup")
-
-        return {
-            "success": True,
-            "message": "Company-specific - credentials stored",
-            "email": email,
-            "password": password,
-            "logs": logs
-        }
-
-    async def _create_taleo_account(self, email: str, password: str, first_name: str, last_name: str, log=None) -> Dict:
-        """Taleo accounts are company-specific."""
-        logs = []
-        def _log(msg):
-            logs.append(msg)
-            if log:
-                log(f"  {msg}")
-
-        _log("Checking Taleo requirements...")
-        _log("Taleo (Oracle) uses company-specific career sites")
-        _log("Each company has unique Taleo instance")
-        _log("Account will be created during first application")
-        _log("Storing credentials for auto-signup")
-
-        return {
-            "success": True,
-            "message": "Company-specific - credentials stored",
-            "email": email,
-            "password": password,
-            "logs": logs
-        }
-
-    async def _create_bamboohr_account(self, email: str, password: str, first_name: str, last_name: str, log=None) -> Dict:
-        """BambooHR accounts are company-specific."""
-        logs = []
-        def _log(msg):
-            logs.append(msg)
-            if log:
-                log(f"  {msg}")
-
-        _log("Checking BambooHR requirements...")
-        _log("BambooHR uses company-specific career portals")
-        _log("Each company has unique BambooHR instance (company.bamboohr.com)")
-        _log("Account will be created during first application")
-        _log("Storing credentials for auto-signup")
-
-        return {
-            "success": True,
-            "message": "Company-specific - credentials stored",
-            "email": email,
-            "password": password,
-            "logs": logs
-        }
-
-    async def handle_ats_login(self, page: Page, platform: str) -> bool:
-        """Handle login for specific ATS platform."""
-        email = self.personal_info.get(f'{platform}_email', self.personal_info.get('email', ''))
-        password = self.personal_info.get(f'{platform}_password', self.personal_info.get('default_job_password', ''))
-
-        if not email or not password:
-            return False
-
-        try:
-            # Look for login form
-            email_field = page.locator("input[type='email'], input[name='email'], input[name='username']")
-            password_field = page.locator("input[type='password']")
-
-            if await email_field.count() > 0 and await password_field.count() > 0:
-                await email_field.first.fill(email)
-                await password_field.first.fill(password)
-
-                # Find and click submit
-                submit = page.locator("button[type='submit'], button:has-text('Sign in'), button:has-text('Log in')")
-                if await submit.count() > 0:
-                    await submit.first.click()
-                    await page.wait_for_load_state("networkidle")
-                    await asyncio.sleep(2)
-                    return True
-
-            return False
-        except Exception:
-            return False
-
-    async def handle_ats_signup(self, page: Page, platform: str) -> bool:
-        """Handle signup/account creation for specific ATS during application."""
-        email = self.personal_info.get('email', '')
-        password = self.personal_info.get(f'{platform}_password', self.personal_info.get('default_job_password', 'AutoApply2024!'))
-        first_name = self.personal_info.get('first_name', '')
-        last_name = self.personal_info.get('last_name', '')
-
-        if not email:
-            return False
-
-        try:
-            # Look for "Create Account" or "Sign Up" link/button
-            create_btn = page.locator("a:has-text('Create'), a:has-text('Sign up'), button:has-text('Create Account')")
-            if await create_btn.count() > 0:
-                await create_btn.first.click()
-                await page.wait_for_load_state("networkidle")
-                await asyncio.sleep(2)
-
-            # Fill signup form
-            email_field = page.locator("input[type='email'], input[name='email']")
-            if await email_field.count() > 0:
-                await email_field.first.fill(email)
-
-            password_field = page.locator("input[type='password']")
-            if await password_field.count() > 0:
-                await password_field.first.fill(password)
-
-            # Confirm password if exists
-            confirm_password = page.locator("input[name*='confirm'], input[placeholder*='Confirm']")
-            if await confirm_password.count() > 0:
-                await confirm_password.first.fill(password)
-
-            first_field = page.locator("input[name*='first'], input[placeholder*='First']")
-            if await first_field.count() > 0:
-                await first_field.first.fill(first_name)
-
-            last_field = page.locator("input[name*='last'], input[placeholder*='Last']")
-            if await last_field.count() > 0:
-                await last_field.first.fill(last_name)
-
-            # Submit signup
-            submit = page.locator("button[type='submit'], button:has-text('Create'), button:has-text('Sign up')")
-            if await submit.count() > 0:
-                await submit.first.click()
-                await page.wait_for_load_state("networkidle")
-                await asyncio.sleep(3)
-
-                # Store the credentials
-                self.personal_info[f'{platform}_email'] = email
-                self.personal_info[f'{platform}_password'] = password
-                return True
-
-            return False
-        except Exception:
-            return False
+        """Update personal info for retrying form fill (credentials are dropped)."""
+        self.personal_info.update(strip_credentials(new_info))
 
     async def auto_apply(
         self,
@@ -914,21 +397,13 @@ class BrowserAutomation:
         # For Workday, the handler manages apply/modal/login/form steps internally
         # For other platforms, we handle login here
         if ats_platform != ATSPlatform.WORKDAY:
-            # Stage 3: Handle login if required (non-Workday)
+            # Stage 3: Detect a sign-in wall (non-Workday). Never log in automatically.
             progress.start_stage('login', 'Checking for login requirements...')
-            try:
-                login_handled = await self.handle_login_if_required(page)
-                if login_handled:
-                    progress.complete_stage('login', 'Login successful')
-                    progress.log('Authenticated with job portal')
-                else:
-                    progress.skip_stage('login', 'No login required')
-                    progress.log('No login needed - public application form')
-                await asyncio.sleep(1)
-            except Exception as e:
-                progress.fail_stage('login', str(e))
-                progress.log(f'Login error: {str(e)}')
-                # Continue anyway - might still work
+            if await self.handle_login_if_required(page):
+                progress.fail_stage('login', 'Sign-in required: please sign in manually')
+                return await self._signin_required_result(page, application, progress)
+            progress.skip_stage('login', 'No login required')
+            progress.log('No login needed - public application form')
 
             # Skip Workday-specific stages for other platforms
             progress.skip_stage('apply', 'Not needed for this platform')
@@ -950,6 +425,9 @@ class BrowserAutomation:
             # First try: Standard form filling
             progress.log('Attempting standard form fill...')
             filled = await handler(page, base_resume, resume_pdf_path, cover_letter_pdf_path)
+
+            if self.signin_required:
+                return await self._signin_required_result(page, application, progress)
 
             if filled:
                 progress.log('Standard form fill successful')
@@ -1031,6 +509,21 @@ class BrowserAutomation:
         if filled:
             application.status = ApplicationStatus.FORM_FILLED
             screenshot_path = await self._take_screenshot(page, application.id, "filled")
+
+            # CAPTCHA detector: never attempt to solve one. Stop at review and
+            # ask the user to complete the CAPTCHA and submit manually.
+            if await self.check_for_captcha(page):
+                progress.skip_stage('submit', 'CAPTCHA present - finish manually')
+                application.notes = "CAPTCHA present. Complete it and submit manually."
+                return AutoApplyResult(
+                    success=True,
+                    status="form_filled",
+                    message="Form filled. A CAPTCHA is present - please complete it and submit manually.",
+                    captcha_detected=True,
+                    screenshot_path=screenshot_path,
+                    fields_filled=fields_filled,
+                    progress=progress.to_dict()
+                )
 
             if auto_submit:
                 progress.start_stage('submit', 'Submitting application...')
@@ -1129,6 +622,26 @@ class BrowserAutomation:
             progress=progress.to_dict()
         )
 
+    async def _signin_required_result(self, page: Page, application: Application, progress) -> "AutoApplyResult":
+        """Stop the run because the site needs the user to sign in themselves."""
+        application.status = ApplicationStatus.MANUAL_REQUIRED
+        application.notes = "Sign-in required. Please sign in manually and finish the application."
+        progress.skip_stage('fill', 'Sign-in required')
+        progress.skip_stage('upload', 'Sign-in required')
+        progress.skip_stage('submit', 'Sign-in required')
+        screenshot_path = None
+        try:
+            screenshot_path = await self._take_screenshot(page, application.id, "signin_required")
+        except Exception:
+            pass
+        return AutoApplyResult(
+            success=False,
+            status="signin_required",
+            message="This site requires you to sign in. Please sign in manually and finish the application.",
+            screenshot_path=screenshot_path,
+            progress=progress.to_dict()
+        )
+
     async def apply_to_job(
         self,
         application: Application,
@@ -1202,7 +715,7 @@ class BrowserAutomation:
                 (["#last_name", "input[name='last_name']", "input[autocomplete='family-name']"], last_name),
                 (["#email", "input[name='email']", "input[type='email']"], resume.email),
                 (["#phone", "input[name='phone']", "input[type='tel']"], resume.phone),
-                (["input[name*='linkedin']", "input[placeholder*='LinkedIn']", "#job_application_answers_attributes_0_text_value"], resume.linkedin or ""),
+                (["input[name*='linkedin']", "input[placeholder*='LinkedIn']"], resume.linkedin or ""),
             ]
 
             for selectors, value in field_mappings:
@@ -1291,19 +804,7 @@ class BrowserAutomation:
                 await resume_input.first.set_input_files(str(resume_pdf))
                 filled_count += 1
 
-            # Step 4: Handle additional questions (Lever often has custom questions)
-            # Try to fill text areas with a generic response
-            textareas = page.locator("textarea")
-            if await textareas.count() > 0:
-                for i in range(await textareas.count()):
-                    try:
-                        ta = textareas.nth(i)
-                        if await ta.is_visible():
-                            current = await ta.input_value()
-                            if not current:
-                                await ta.fill("Please see my resume for details.")
-                    except Exception:
-                        continue
+            # Custom questions are left for the user to answer.
 
             return filled_count > 0
 
@@ -1381,7 +882,7 @@ class BrowserAutomation:
         Workday Application Flow:
         1. Job Description Page -> Click "Apply" button
         2. "Start Your Application" Modal -> Click "Use My Last Application" or "Autofill with Resume"
-        3. Sign In Page (if not logged in) -> Login with credentials
+        3. Sign In Page (if not logged in) -> STOP: the user must sign in manually
         4. Multi-step Application Form -> Fill each step and click "Next"
            - My Information
            - My Experience
@@ -1617,49 +1118,17 @@ class BrowserAutomation:
             except:
                 pass
 
-            max_login_attempts = 3
-            for login_attempt in range(1, max_login_attempts + 1):
-                is_signin = await self._is_on_signin_page(page)
-                print(f"[Workday] _is_on_signin_page returned: {is_signin}", flush=True)
-
-                if not is_signin:
-                    print(f"[Workday] Step 3: Not on sign-in page, proceeding to form fill", flush=True)
-                    if progress:
-                        progress.log('Not on sign-in page, proceeding to form')
-                    break
-
-                print(f"[Workday] Step 3: Login attempt {login_attempt}/{max_login_attempts}", flush=True)
+            # AutoApply never signs in to Workday (or anywhere else) on the
+            # user's behalf. If a sign-in wall is shown, stop and hand over.
+            if await self._is_on_signin_page(page):
+                print("[Workday] Sign-in required - stopping for manual sign in", flush=True)
+                self.signin_required = True
                 if progress:
-                    progress.log(f'Login attempt {login_attempt}/{max_login_attempts}')
-                login_success = await self._handle_workday_login(page)
-                print(f"[Workday] _handle_workday_login returned: {login_success}", flush=True)
-                if progress:
-                    progress.log(f'Login result: {"success" if login_success else "failed"}')
-
-                if login_success:
-                    await asyncio.sleep(3)
-                    still_on_signin = await self._is_on_signin_page(page)
-                    print(f"[Workday] After login, still on signin page: {still_on_signin}", flush=True)
-                    if not still_on_signin:
-                        print(f"[Workday] Login successful! Now on: {page.url}", flush=True)
-                        break
-                else:
-                    print(f"[Workday] Login attempt {login_attempt} failed", flush=True)
-
-            final_signin_check = await self._is_on_signin_page(page)
-            print(f"[Workday] Final signin check: {final_signin_check}", flush=True)
-            if final_signin_check:
-                print("[Workday] ERROR: Could not complete login - still on sign-in page", flush=True)
-                if progress:
-                    progress.fail_stage('login', 'Could not complete login')
+                    progress.fail_stage('login', 'Sign-in required: please sign in manually and finish the application')
                 return False
 
-            # Login complete or not needed
             if progress:
-                if not await self._is_on_signin_page(page):
-                    progress.complete_stage('login', 'Login successful')
-                else:
-                    progress.skip_stage('login', 'No login required')
+                progress.skip_stage('login', 'No login required')
                 progress.start_stage('form', 'Navigating form steps...')
 
             # ============================================================
@@ -1693,268 +1162,6 @@ class BrowserAutomation:
             print(f"[Workday] Form fill error: {e}", flush=True)
             if progress:
                 progress.log(f'Workday error: {str(e)}')
-            import traceback
-            traceback.print_exc()
-            return False
-
-    async def _handle_workday_login(self, page: Page) -> bool:
-        """Handle Workday sign-in page if present.
-
-        Workday Login Flow:
-        1. Landing page shows "Sign in with email" / "Sign in with Google" buttons
-        2. Click "Sign in with email" -> modal appears with email + password fields
-        3. Fill email and password
-        4. Click "Sign In" button (NOT just Enter key - Enter often doesn't work)
-        5. Wait for redirect to application form
-        """
-        try:
-            url_before = page.url
-            print(f"[Workday] Login handler starting, URL: {url_before}", flush=True)
-
-            # Step 1: Check if we need to click "Sign in with email" button first
-            sign_in_with_email_selectors = [
-                "button:has-text('Sign in with email')",
-                "a:has-text('Sign in with email')",
-                "[data-automation-id='signInWithEmail']",
-            ]
-
-            for selector in sign_in_with_email_selectors:
-                try:
-                    email_btn = page.locator(selector)
-                    if await email_btn.count() > 0 and await email_btn.first.is_visible():
-                        print(f"[Workday] Clicking 'Sign in with email': {selector}", flush=True)
-                        await email_btn.first.click()
-                        print(f"[Workday] Waiting for login form to appear...", flush=True)
-                        await asyncio.sleep(3)  # Wait longer for form to load
-                        break
-                except Exception as e:
-                    continue
-
-            # Wait for login form to be fully loaded
-            await asyncio.sleep(2)
-
-            # Step 2: Find email field
-            email_selectors = [
-                "[data-automation-id='email']",
-                "input[type='email']",
-                "input[data-automation-id='emailAddress']",
-                "input[name='email']",
-                "input[placeholder*='email' i]",
-            ]
-
-            target_email_field = None
-            for sel in email_selectors:
-                field = page.locator(sel)
-                if await field.count() > 0:
-                    # Use last visible one (modal fields are last)
-                    for i in range(await field.count() - 1, -1, -1):
-                        f = field.nth(i)
-                        if await f.is_visible():
-                            target_email_field = f
-                            print(f"[Workday] Found email field: {sel}, index {i}", flush=True)
-                            break
-                if target_email_field:
-                    break
-
-            if not target_email_field:
-                print("[Workday] No email field found", flush=True)
-                return False
-
-            # Step 3: Get credentials
-            workday_email = self.personal_info.get('workday_email', '')
-            workday_password = self.personal_info.get('workday_password', '')
-
-            if not workday_email or not workday_password:
-                print("[Workday] No credentials stored - cannot login", flush=True)
-                return False
-
-            # Step 4: Fill email
-            print(f"[Workday] Filling email: {workday_email}", flush=True)
-            await target_email_field.click()
-            await asyncio.sleep(0.3)
-            await target_email_field.fill("")  # Clear first
-            await asyncio.sleep(0.3)
-            await target_email_field.type(workday_email, delay=100)  # Type slower for reliability
-            await asyncio.sleep(1)  # Wait for any validation
-
-            # Step 5: Find and fill password field
-            password_field = page.locator("input[type='password'], [data-automation-id='password']")
-            target_password_field = None
-
-            if await password_field.count() > 0:
-                for i in range(await password_field.count() - 1, -1, -1):
-                    f = password_field.nth(i)
-                    if await f.is_visible():
-                        target_password_field = f
-                        print(f"[Workday] Found password field, index {i}", flush=True)
-                        break
-
-            if not target_password_field:
-                print("[Workday] No password field found", flush=True)
-                return False
-
-            print("[Workday] Filling password...", flush=True)
-            await target_password_field.click()
-            await asyncio.sleep(0.3)
-            await target_password_field.fill("")
-            await asyncio.sleep(0.3)
-            await target_password_field.type(workday_password, delay=100)  # Type slower
-            await asyncio.sleep(1)  # Wait for any validation
-
-            # Step 6: Find and click Sign In button
-            # IMPORTANT: Click the button explicitly, don't just press Enter
-            # Step 6: Find and click Sign In button
-            # IMPORTANT: Workday uses a click_filter overlay that intercepts clicks!
-            # We must click click_filter FIRST, not the actual button
-            sign_in_btn_selectors = [
-                # click_filter is the overlay that actually receives clicks
-                "[data-automation-id='click_filter']",
-                # Alternative selectors
-                "div[role='button'][aria-label='Submit']",
-                "[role='button']:has-text('Sign In')",
-                "button:has-text('Sign In')",
-                "[data-automation-id='signInSubmitButton']",
-                "button[type='submit']",
-            ]
-
-            print(f"[Workday] Looking for Sign In button...", flush=True)
-
-            # Wait a moment for form to be ready
-            await asyncio.sleep(1)
-
-            sign_in_clicked = False
-            for selector in sign_in_btn_selectors:
-                try:
-                    btn = page.locator(selector)
-                    count = await btn.count()
-                    print(f"[Workday] Selector '{selector}': found {count} elements", flush=True)
-                    if count > 0:
-                        # Use last visible button (modal button)
-                        for i in range(count - 1, -1, -1):
-                            b = btn.nth(i)
-                            if await b.is_visible():
-                                btn_text = ""
-                                try:
-                                    btn_text = await b.inner_text()
-                                except:
-                                    pass
-                                print(f"[Workday] Clicking Sign In button: {selector}, index {i}, text='{btn_text}'", flush=True)
-
-                                # Try NATIVE click first (JS click may not trigger form submit)
-                                try:
-                                    await b.click(timeout=5000)
-                                    print(f"[Workday] Native click succeeded", flush=True)
-                                except Exception as e:
-                                    print(f"[Workday] Native click failed: {e}, trying JS click", flush=True)
-                                    try:
-                                        await b.evaluate("el => el.click()")
-                                        print(f"[Workday] JS click succeeded", flush=True)
-                                    except Exception as e2:
-                                        print(f"[Workday] JS click also failed: {e2}", flush=True)
-                                        # Last resort: try force click
-                                        await b.click(force=True)
-                                        print(f"[Workday] Force click succeeded", flush=True)
-
-                                sign_in_clicked = True
-                                break
-                    if sign_in_clicked:
-                        break
-                except Exception as e:
-                    continue
-
-            if not sign_in_clicked:
-                # Fallback: try pressing Enter
-                print("[Workday] No Sign In button found, trying Enter key...", flush=True)
-                await target_password_field.press("Enter")
-                print("[Workday] Enter key pressed", flush=True)
-
-            # Step 7: Wait for login to complete and check result
-            print("[Workday] Waiting for login to complete...", flush=True)
-            await asyncio.sleep(2)
-
-            # Wait for page to change or network to settle
-            try:
-                await page.wait_for_load_state("networkidle", timeout=10000)
-            except:
-                pass
-
-            await asyncio.sleep(2)
-            url_after = page.url
-            print(f"[Workday] After login attempt, URL: {url_after}", flush=True)
-
-            # Check for login errors
-            error_selectors = [
-                "[data-automation-id='errorMessage']",
-                "[role='alert']",
-                ".error-message",
-                "text=Invalid",
-                "text=incorrect",
-            ]
-
-            for sel in error_selectors:
-                try:
-                    err = page.locator(sel)
-                    if await err.count() > 0 and await err.first.is_visible():
-                        try:
-                            error_text = await err.first.inner_text()
-                            print(f"[Workday] Login error detected: {error_text}", flush=True)
-                        except:
-                            print("[Workday] Login error detected", flush=True)
-                        return False
-                except:
-                    continue
-
-            # FIRST: Check if password field is still visible (means login FAILED)
-            password_still_visible = page.locator("input[type='password']:visible")
-            if await password_still_visible.count() > 0:
-                print(f"[Workday] Login FAILED - password field still visible", flush=True)
-                # Check for specific error messages
-                error_texts = ["Invalid", "incorrect", "failed", "error", "wrong"]
-                try:
-                    page_text = await page.inner_text("body")
-                    for err in error_texts:
-                        if err.lower() in page_text.lower():
-                            print(f"[Workday] Found error text: {err}", flush=True)
-                            break
-                except:
-                    pass
-                return False
-
-            # Check if we're now on application form (password field gone = success)
-            # Use ONLY selectors that exist on form page, NOT on sign-in page
-            application_indicators = [
-                "[data-automation-id='legalNameSection_firstName']",
-                "[data-automation-id='legalNameSection_lastName']",
-                "[data-automation-id='file-upload-drop-zone']",
-                "[data-automation-id='bottom-navigation-next-button']",
-            ]
-
-            for sel in application_indicators:
-                try:
-                    elem = page.locator(sel)
-                    if await elem.count() > 0 and await elem.first.is_visible():
-                        print(f"[Workday] Login successful! Now on application form (found: {sel})", flush=True)
-                        return True
-                except:
-                    continue
-
-            # Check if URL changed significantly
-            if url_after != url_before and 'signin' not in url_after.lower():
-                print(f"[Workday] Login appears successful - URL changed")
-                return True
-
-            # Check if password field is still visible (means login failed)
-            password_visible = page.locator("input[type='password']:visible")
-            if await password_visible.count() > 0:
-                print("[Workday] Password field still visible - login failed")
-                return False
-
-            # If we got here and no errors, assume success
-            print("[Workday] Login completed (no errors detected)")
-            return True
-
-        except Exception as e:
-            print(f"[Workday] Login error: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -2267,82 +1474,15 @@ class BrowserAutomation:
                         except:
                             pass
 
-                # Handle dropdowns (phone type, country, state, source, etc.)
+                # Dropdowns are only filled from values the user saved in their
+                # profile. Nothing is guessed (no default country, phone type or
+                # "How did you hear about us" answer).
                 dropdown_fields = [
-                    ("[data-automation-id='phone-device-type']", "Mobile"),
-                    ("[data-automation-id='countryDropdown']", "United States"),
-                    ("[data-automation-id='addressSection_countryRegion']", "United States"),
-                    # "How Did You Hear About Us?" - common required field
-                    ("[data-automation-id='sourcePrompt']", "LinkedIn"),
-                    ("[data-automation-id='source']", "LinkedIn"),
+                    ("[data-automation-id='phone-device-type']", self.personal_info.get('phone_type', '')),
+                    ("[data-automation-id='countryDropdown']", self.personal_info.get('country', '')),
+                    ("[data-automation-id='addressSection_countryRegion']", self.personal_info.get('country', '')),
                 ]
-
-                # Handle "How Did You Hear About Us?" - hierarchical multi-select dropdown
-                # Structure: Click textbox -> Select category (Job Board) -> Select option (Linkedin Jobs)
-                try:
-                    # Find the searchable dropdown textbox
-                    hear_about_textbox = page.locator("input[placeholder='Search']").filter(has=page.locator("xpath=ancestor::*[contains(., 'How Did You Hear')]")).first
-                    # Alternative: find by aria-label or nearby label
-                    if await hear_about_textbox.count() == 0:
-                        hear_about_textbox = page.get_by_role("textbox", name="How Did You Hear About Us?")
-
-                    if await hear_about_textbox.count() > 0:
-                        # Check if already filled (shows "X items selected")
-                        parent_container = hear_about_textbox.locator("xpath=ancestor::*[3]")
-                        container_text = ""
-                        try:
-                            container_text = await parent_container.inner_text()
-                        except:
-                            pass
-
-                        if "item selected" not in container_text.lower() and "items selected" not in container_text.lower():
-                            print(f"[Workday] Found 'How Did You Hear About Us?' dropdown, clicking...", flush=True)
-                            await hear_about_textbox.click()
-                            await asyncio.sleep(0.8)
-
-                            # First, try to find and click "Job Board" category
-                            job_board_option = page.locator("text=Job Board").first
-                            if await job_board_option.count() > 0 and await job_board_option.is_visible():
-                                print(f"[Workday] Clicking 'Job Board' category", flush=True)
-                                await job_board_option.click()
-                                await asyncio.sleep(0.8)
-
-                                # Now look for "Linkedin Jobs" in the sub-options
-                                linkedin_option = page.locator("text=Linkedin Jobs").first
-                                if await linkedin_option.count() > 0 and await linkedin_option.is_visible():
-                                    print(f"[Workday] Selecting 'Linkedin Jobs'", flush=True)
-                                    await linkedin_option.click()
-                                    fields_filled_this_step += 1
-                                    await asyncio.sleep(0.5)
-                                    print(f"[Workday] Successfully selected 'Linkedin Jobs' for How Did You Hear", flush=True)
-                                else:
-                                    # Try Indeed or first available option
-                                    indeed_option = page.locator("text=Indeed").first
-                                    if await indeed_option.count() > 0 and await indeed_option.is_visible():
-                                        await indeed_option.click()
-                                        fields_filled_this_step += 1
-                                        print(f"[Workday] Selected 'Indeed' as fallback", flush=True)
-                            else:
-                                # Try Social Media path as fallback
-                                social_media = page.locator("text=Social Media").first
-                                if await social_media.count() > 0 and await social_media.is_visible():
-                                    print(f"[Workday] Clicking 'Social Media' category", flush=True)
-                                    await social_media.click()
-                                    await asyncio.sleep(0.8)
-                                    # Select first available option
-                                    first_option = page.locator("[role='option']").first
-                                    if await first_option.count() > 0:
-                                        await first_option.click()
-                                        fields_filled_this_step += 1
-                                        print(f"[Workday] Selected first Social Media option", flush=True)
-
-                            # Press Escape to close dropdown if still open
-                            await page.keyboard.press("Escape")
-                            await asyncio.sleep(0.3)
-                        else:
-                            print(f"[Workday] 'How Did You Hear' already filled", flush=True)
-                except Exception as e:
-                    print(f"[Workday] Error handling 'How Did You Hear': {e}", flush=True)
+                dropdown_fields = [(sel, val) for sel, val in dropdown_fields if val]
 
                 for selector, value in dropdown_fields:
                     try:
@@ -2359,38 +1499,8 @@ class BrowserAutomation:
                     except:
                         pass
 
-                # Handle checkboxes (terms, agreements)
-                # First try role-based selector for Terms checkbox (Voluntary Disclosures page)
-                try:
-                    terms_checkbox = page.get_by_role("checkbox", name="By selecting the checkbox")
-                    if await terms_checkbox.count() > 0 and await terms_checkbox.first.is_visible():
-                        is_checked = await terms_checkbox.first.is_checked()
-                        if not is_checked:
-                            await terms_checkbox.first.click()
-                            print(f"[Workday] Checked Terms and Conditions checkbox", flush=True)
-                            fields_filled_this_step += 1
-                except:
-                    pass
-
-                # Fallback to CSS selectors
-                checkbox_selectors = [
-                    "[data-automation-id='agreementCheckbox']",
-                    "input[type='checkbox'][data-automation-id*='agree']",
-                    "[role='checkbox']:has-text('agree')",
-                    "[role='checkbox']:has-text('Terms')",
-                ]
-
-                for selector in checkbox_selectors:
-                    try:
-                        checkbox = page.locator(selector)
-                        if await checkbox.count() > 0 and await checkbox.first.is_visible():
-                            is_checked = await checkbox.first.is_checked()
-                            if not is_checked:
-                                await checkbox.first.click()
-                                print(f"[Workday] Checked: {selector}", flush=True)
-                                fields_filled_this_step += 1
-                    except:
-                        pass
+                # Terms/consent checkboxes are never ticked automatically: the
+                # user must review and accept them personally.
 
                 fields_filled_total += fields_filled_this_step
                 print(f"[Workday] Fields filled this step: {fields_filled_this_step}")
@@ -2788,13 +1898,11 @@ class BrowserAutomation:
                 await asyncio.sleep(1)
 
                 # Look for Continue/Submit button to proceed to actual form
+                # Only navigation buttons - never anything that could submit.
                 continue_selectors = [
                     "#uploadFileResume",  # BMC specific
                     "button:has-text('Continue')",
                     "button:has-text('Next')",
-                    "button:has-text('Submit')",
-                    "button[type='submit']",
-                    "input[type='submit']",
                 ]
 
                 for selector in continue_selectors:

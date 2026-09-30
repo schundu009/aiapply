@@ -31,8 +31,15 @@ import time
 from pypdf import PdfReader
 from docx import Document
 
+from src.auth import install_auth
 from src.browser_automation import BrowserAutomation
 from src.config import settings
+from src.profile_store import (
+    load_profile as _load_profile,
+    save_profile as _save_profile,
+    scrub_profile_files,
+    strip_credentials,
+)
 try:
     from src.database import is_database_available, get_db_session, ApplicationDB, UploadedDocumentDB, SettingsDB
 except Exception as e:
@@ -68,6 +75,11 @@ app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
 app.config['UPLOAD_FOLDER'] = Path('uploads')
 app.config['UPLOAD_FOLDER'].mkdir(exist_ok=True)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
+
+# Every route (pages, API, SSE, static files, downloads) requires a Cariara
+# admin token; only /healthz and the login page are public. Registered first so
+# it runs before any other before_request hook.
+install_auth(app)
 
 # ============================================
 # Rate Limiting (Simple in-memory implementation)
@@ -614,89 +626,32 @@ except Exception as e:
 print("[Init] App ready!", flush=True)
 
 
-def get_personal_info_path():
-    return Path("personal_info.json")
-
-
 def load_personal_info():
-    path = get_personal_info_path()
-    defaults = get_default_personal_info()
-    if path.exists():
-        try:
-            existing = json.loads(path.read_text())
-            defaults.update(existing)
-        except:
-            pass
-    return defaults
-
-
-def get_default_personal_info():
-    return {
-        'first_name': '', 'last_name': '', 'preferred_name': '',
-        'email': '', 'phone': '', 'pronouns': '',
-        'address': '', 'address_line_2': '', 'city': '', 'state': '',
-        'zip_code': '', 'country': 'United States',
-        'linkedin': '', 'github': '', 'portfolio': '', 'website': '', 'twitter': '',
-        'current_company': '', 'current_title': '', 'current_employer': 'No',
-        'work_authorization': 'US Citizen',
-        'requires_sponsorship': 'No',
-        'legally_authorized': 'Yes',
-        'willing_to_relocate': 'Yes',
-        'relocation_locations': '',
-        'remote_preference': 'Hybrid',
-        'willing_to_travel': 'Up to 25%',
-        'desired_salary': '',
-        'salary_currency': 'USD',
-        'expected_salary_min': '',
-        'expected_salary_max': '',
-        'available_start': 'Immediately',
-        'notice_period': '2 weeks',
-        'years_experience': '',
-        'highest_education': "Bachelor's Degree",
-        'how_did_you_hear': 'LinkedIn',
-        'referral_name': '',
-        'previously_applied': 'No',
-        'previously_employed': 'No',
-        'gender': 'Decline to self-identify',
-        'race_ethnicity': 'Decline to self-identify',
-        'veteran_status': 'Decline to self-identify',
-        'disability_status': 'Decline to self-identify',
-        'government_employee': 'No',
-        'non_compete': 'No',
-        'background_check_consent': 'Yes',
-        'data_processing_consent': 'Yes',
-        'privacy_agreement': 'Yes',
-        # Login credentials for job sites
-        'google_email': '',
-        'google_password': '',
-        'linkedin_email': '',
-        'linkedin_password': '',
-        # ATS Platform credentials
-        'workday_email': '',
-        'workday_password': '',
-        'greenhouse_email': '',
-        'greenhouse_password': '',
-        'lever_email': '',
-        'lever_password': '',
-        'ashby_email': '',
-        'ashby_password': '',
-        'icims_email': '',
-        'icims_password': '',
-        'taleo_email': '',
-        'taleo_password': '',
-        'smartrecruiters_email': '',
-        'smartrecruiters_password': '',
-        'jobvite_email': '',
-        'jobvite_password': '',
-        'bamboohr_email': '',
-        'bamboohr_password': '',
-        # Default password for auto-creating accounts
-        'default_job_password': '',
-    }
+    """Load the saved profile. Credential fields are never returned."""
+    return _load_profile()
 
 
 def save_personal_info(info):
-    get_personal_info_path().write_text(json.dumps(info, indent=2))
+    """Persist the profile after stripping any credential fields."""
+    return _save_profile(info)
+
+
+# Remove passwords left behind by older versions of this app.
+try:
+    _scrubbed = scrub_profile_files()
+    if _scrubbed:
+        print(f"[Init] Removed stored credentials from: {', '.join(_scrubbed)}", flush=True)
+except Exception as e:
+    print(f"[Init] Credential scrub failed: {e}", flush=True)
+
+# Older builds saved logged-in browser sessions (cookies) here; remove them.
+try:
+    _legacy_session = Path('data/browser_state.json')
+    if _legacy_session.exists():
+        _legacy_session.unlink()
+        print("[Init] Removed saved browser session state", flush=True)
+except Exception as e:
+    print(f"[Init] Could not remove saved browser session: {e}", flush=True)
 
 
 def extract_text_from_pdf(file_bytes):
@@ -1205,7 +1160,9 @@ def save_resume_experience(filename):
 
 @app.route('/api/profile', methods=['POST'])
 def save_profile():
-    data = request.get_json()
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'error': 'Invalid profile data'}), 400
     save_personal_info(data)
     return jsonify({'success': True})
 
@@ -1219,77 +1176,14 @@ def add_profile_fields():
     if not fields:
         return jsonify({'success': False, 'error': 'No fields provided'}), 400
 
-    # Load existing info and add new fields
+    # Load existing info and add new fields (credential fields are never accepted)
     current_info = load_personal_info()
-    for key, value in fields.items():
+    for key, value in strip_credentials(fields).items():
         if value and not current_info.get(key):  # Only add if not already set
             current_info[key] = value
 
     save_personal_info(current_info)
     return jsonify({'success': True, 'updated_fields': list(fields.keys())})
-
-
-@app.route('/api/create-accounts', methods=['POST'])
-def create_job_board_accounts():
-    """Create accounts on job boards automatically."""
-    data = request.get_json() or {}
-    platforms = data.get('platforms')  # None means all platforms
-
-    personal_info = load_personal_info()
-
-    # Check required fields
-    if not personal_info.get('email'):
-        return jsonify({'success': False, 'error': 'Email is required in your profile'}), 400
-    if not personal_info.get('first_name') or not personal_info.get('last_name'):
-        return jsonify({'success': False, 'error': 'First and last name are required in your profile'}), 400
-
-    # Generate default password if not set
-    if not personal_info.get('default_job_password'):
-        import secrets
-        import string
-        chars = string.ascii_letters + string.digits + "!@#$"
-        personal_info['default_job_password'] = ''.join(secrets.choice(chars) for _ in range(16))
-        save_personal_info(personal_info)
-
-    all_logs = []
-
-    try:
-        all_logs.append("Initializing browser automation...")
-        automation = BrowserAutomation(headless=True, personal_info=personal_info)
-
-        all_logs.append("Starting account creation process...")
-        response = asyncio.run(automation.create_job_board_accounts(platforms))
-
-        all_logs.append("Closing browser...")
-        asyncio.run(automation.stop())
-
-        # Extract results from response
-        results = response.get('results', response)
-        logs = response.get('logs', [])
-        all_logs.extend(logs)
-
-        # Update stored credentials with any new ones
-        for platform, result in results.items():
-            if isinstance(result, dict) and result.get('success') and result.get('email'):
-                personal_info[f'{platform}_email'] = result['email']
-                if result.get('password'):
-                    personal_info[f'{platform}_password'] = result['password']
-
-        save_personal_info(personal_info)
-        all_logs.append("Credentials saved successfully")
-
-        return jsonify({
-            'success': True,
-            'results': results,
-            'logs': all_logs
-        })
-    except Exception as e:
-        all_logs.append(f"Error: {str(e)}")
-        return jsonify({
-            'success': False,
-            'error': str(e),
-            'logs': all_logs
-        }), 500
 
 
 @app.route('/api/delete/resume/<filename>', methods=['DELETE'])
@@ -1315,9 +1209,17 @@ def delete_cover_letter(filename):
 
 @app.route('/download/<path:filepath>')
 def download_file(filepath):
-    full_path = Path(filepath)
-    if full_path.exists():
-        return send_file(full_path, as_attachment=True)
+    # Only files generated under output/ may be downloaded (no path traversal).
+    # Links embed the absolute output_dir, whose leading slash may be merged away.
+    output_root = (Path.cwd() / 'output').resolve()
+    for candidate in (Path(filepath), Path.cwd() / filepath, Path('/' + filepath.lstrip('/'))):
+        try:
+            full_path = candidate.resolve()
+            full_path.relative_to(output_root)
+        except (ValueError, OSError):
+            continue
+        if full_path.is_file():
+            return send_file(full_path, as_attachment=True)
     return "File not found", 404
 
 
@@ -1360,11 +1262,7 @@ def _run_auto_apply_background(app_id: str, app_record, resume_pdf_path: Path,
                 except Exception:
                     pass
             else:
-                try:
-                    await automation.save_session_state()
-                    print("[AutoApply] Browser left open for user review. Close manually when done.")
-                except Exception:
-                    pass
+                print("[AutoApply] Browser left open for user review. Close manually when done.")
 
     try:
         result = asyncio.run(run_auto_apply())
@@ -1476,8 +1374,11 @@ def apply_to_job(app_id):
             data = request.get_json(silent=True) or {}
         except Exception:
             data = {}
-        auto_submit = data.get('auto_submit', True)
-        headless = data.get('headless', True)
+        # Never submit unless the caller explicitly opts in; the default stops at review.
+        auto_submit = data.get('auto_submit', False) is True
+        headless = data.get('headless', True) is not False
+        if not headless and sys.platform.startswith('linux') and not os.environ.get('DISPLAY'):
+            headless = True  # no display on the server
 
         # Parse resume to get base info for form filling
         resume_text = get_resume_text()

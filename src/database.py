@@ -86,6 +86,21 @@ class SettingsDB(Base):
     user_id = Column(Integer)
 
 
+def normalize_database_url(db_url: str) -> str:
+    """Pin the psycopg2 driver for PostgreSQL URLs.
+
+    SQLAlchemy 2.1 maps a bare ``postgresql://`` URL to psycopg (v3), which is
+    not installed ("No module named 'psycopg'"). Railway also hands out
+    ``postgres://`` URLs, which SQLAlchemy does not accept at all.
+    """
+    if not db_url:
+        return db_url
+    for prefix in ("postgres://", "postgresql://"):
+        if db_url.startswith(prefix):
+            return "postgresql+psycopg2://" + db_url[len(prefix):]
+    return db_url
+
+
 def init_database():
     """Initialize database connection if PostgreSQL is configured."""
     global engine, SessionLocal
@@ -94,7 +109,7 @@ def init_database():
         return False
 
     try:
-        db_url = settings.database_url
+        db_url = normalize_database_url(settings.database_url)
         # Handle Railway internal connections
         if 'railway.internal' in db_url and '?' not in db_url:
             db_url = f"{db_url}?sslmode=disable"
@@ -119,7 +134,7 @@ def init_database():
         return True
 
     except Exception as e:
-        print(f"Database initialization failed: {e}")
+        print(f"Database initialization failed: {type(e).__name__}: {e}")
         return False
 
 

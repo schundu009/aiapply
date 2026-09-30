@@ -42,6 +42,14 @@ autoapply/
 
 ## Critical Patterns & Rules
 
+### 0. Security rules (do not regress)
+- Every route requires a Cariara admin JWT (`src/auth.py`); only `/healthz`, `/login`, `/logout` are public.
+- Never store, request or use passwords for job sites/Google/LinkedIn/ATS; never create accounts or log in.
+- No stealth: no AutomationControlled flag, UA spoofing, fake geolocation or human-like delays. Detect CAPTCHAs and stop.
+- No hardcoded factual answers (authorization, sponsorship, relocation, consents, EEO, "how did you hear").
+- The LLM (form_agent) only drafts free-text answers from non-sensitive profile fields + resume.
+- auto_submit defaults to False.
+
 ### 1. Browser Automation (browser_automation.py)
 **IMPORTANT - DO NOT:**
 - Click "Create Account", "Sign In", "Sign Up" buttons - these navigate to login pages
@@ -90,7 +98,7 @@ except Exception:
 const response = await fetch(`/api/apply/${appId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ headless: false, auto_submit: true })
+    body: JSON.stringify({ headless: false, auto_submit: false })
 });
 
 // Check content-type before parsing
@@ -105,23 +113,18 @@ const data = await response.json();
 
 ### Workday (*.myworkdayjobs.com)
 - Uses `data-automation-id` attributes
-- **AUTHENTICATION:** Uses stored credentials from `personal_info.json`:
-  - `workday_email`: Email for Workday login
-  - `workday_password`: Password for Workday login
+- **AUTHENTICATION:** Never automated. No credentials are stored. If a sign-in page appears
+  the run stops with status `signin_required` ("sign in manually").
 - **WORKFLOW:**
   1. Navigate to job URL
   2. Click Apply button: `[data-automation-id='jobPostingApplyButton']`
   3. Handle modal: "Apply Manually" or "Apply with Resume"
-  4. If sign-in page appears:
-     - Auto-fill email and password from stored credentials
-     - Click Sign In button
-     - Wait for redirect to application form
-  5. Fill application form fields
+  4. If sign-in page appears: STOP and ask the user to sign in manually
+  5. Fill application form fields from the saved profile only
   6. Upload resume
-  7. Submit
+  7. Stop at review (auto_submit defaults to False)
 - **MULTI-STEP FLOW:**
   - `_fill_workday_form`: Main entry point
-  - `_handle_workday_login`: Handles sign-in page
   - `_navigate_workday_steps`: Navigates multi-page forms
   - `_fill_workday_fields`: Fills individual fields
 - **BROWSER BEHAVIOR:**
@@ -169,19 +172,14 @@ const data = await response.json();
 **Solution:** Browser now stays open when `headless=false`:
 - In visible mode: browser stays open for user review
 - In headless mode: browser closes automatically
-- Session state is saved for reuse
 
 ### Issue: Form fields not being filled
 **Cause:** Selectors not matching
 **Solution:** Use multiple selector strategies, check browser console for actual field attributes
 
-### Issue: Workday login fails
-**Cause:** Credentials not stored or incorrect
-**Solution:**
-1. Check `personal_info.json` has `workday_email` and `workday_password`
-2. Verify credentials are correct
-3. Check console logs for `[Workday]` prefixed messages
-4. If login fails, check for error messages on page
+### Issue: Workday requires sign in
+AutoApply does not log in for users. The run stops with `signin_required`; the user signs in
+and completes the application manually.
 
 ### Issue: Submit button not found
 **Cause:** Platform-specific submit button patterns
@@ -316,7 +314,6 @@ Install: `pip install browser-use langchain-anthropic`
 
 ### What's Working
 - CV/CL generation from job URLs
-- Workday login via click_filter
 - Form field detection and filling
 - Resume upload
 
@@ -325,7 +322,6 @@ Install: `pip install browser-use langchain-anthropic`
 - Some dropdowns need manual selection
 
 ### Recent Fixes
-1. Fixed Workday login - uses `click_filter` overlay instead of button
 2. Added validation error detection before navigation
 3. Multiple click strategies for navigation buttons
 4. Browser-Use integration as alternative approach

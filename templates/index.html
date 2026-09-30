@@ -602,7 +602,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     if (data.captcha_detected) {
                         updateStep('captcha', 'error');
                         statusEl.textContent = 'CAPTCHA Detected';
-                        messageEl.innerHTML = '<div class="alert alert-warning">CAPTCHA detected. Please solve manually.</div>';
+                        messageEl.innerHTML = '<div class="alert alert-warning">A CAPTCHA is on this form. Complete it and submit the application yourself.</div>';
                     }
 
                     if (data.status === 'submitted') {
@@ -615,11 +615,13 @@ document.addEventListener('DOMContentLoaded', async function() {
                         button.classList.add('btn-success');
                     } else if (data.status === 'form_filled') {
                         statusEl.textContent = 'Form Filled';
-                        messageEl.innerHTML = '<div class="alert alert-warning">Form filled. Review and submit manually.</div>';
+                        if (!data.captcha_detected) {
+                            messageEl.innerHTML = '<div class="alert alert-warning">Form filled. Review and submit manually.</div>';
+                        }
                         button.textContent = 'Form Filled';
                         button.classList.remove('btn-primary');
                         button.classList.add('btn-warning');
-                    } else if (data.status === 'manual_required' || data.status === 'fill_failed') {
+                    } else if (data.status === 'manual_required' || data.status === 'fill_failed' || data.status === 'signin_required') {
                         statusEl.textContent = 'Manual Required';
                         messageEl.innerHTML = `<div class="alert alert-warning">${data.message || 'Could not auto-fill.'}</div>`;
                         button.textContent = 'Manual';
@@ -662,7 +664,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     const response = await fetch(`/api/apply/${appId}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ headless: true, auto_submit: true })
+                        body: JSON.stringify({ headless: true, auto_submit: false })
                     });
 
                     const contentType = response.headers.get('content-type');

@@ -4,6 +4,23 @@ import json
 import re
 from typing import Dict, List, Optional, Any
 from .config import settings
+from .profile_store import strip_credentials
+
+# Field types the LLM may draft answers for.
+LLM_FREE_TEXT_TYPES = frozenset({"text", "textarea"})
+
+# Profile fields that may be shared with the LLM. Contact details, addresses,
+# credentials and every factual/legal/EEO field are deliberately excluded.
+LLM_SAFE_PROFILE_FIELDS = (
+    "first_name", "last_name", "preferred_name", "current_title",
+    "current_company", "years_experience", "highest_education",
+    "linkedin", "github", "portfolio", "website",
+)
+
+
+def llm_safe_profile(personal_info: Optional[Dict]) -> Dict[str, str]:
+    info = strip_credentials(personal_info or {})
+    return {k: str(info[k]).strip() for k in LLM_SAFE_PROFILE_FIELDS if info.get(k)}
 
 
 class FormAgent:
@@ -111,133 +128,152 @@ Only return the JSON array, no other text."""
             return {"error": str(e), "fields": []}
 
     def map_field_to_value(self, field_label: str, field_type: str, personal_info: Dict) -> Optional[str]:
-        """Map a form field to the appropriate value from personal info."""
-        label_lower = field_label.lower()
+        """Map a form field to a value the user saved in their profile.
 
-        # Direct mappings
+        There are no fallback answers: if the user has not saved a value the
+        field is left blank (and reported as missing when required).
+        """
+        label_lower = field_label.lower()
+        info = strip_credentials(personal_info)
+
+        def v(key: str) -> str:
+            value = info.get(key, '')
+            return str(value).strip() if value is not None else ''
+
+        # Factual / legal / consent / EEO questions: saved profile values only.
+        # Checked first so e.g. "Have you previously worked here?" never falls
+        # through to a generic "work" or "name" match.
+        factual_key = self._factual_profile_key(label_lower)
+        if factual_key is not None:
+            return v(factual_key) or None
+
+        full_name = f"{v('first_name')} {v('last_name')}".strip()
         mappings = {
             # Name fields
-            'first name': personal_info.get('first_name', ''),
-            'first': personal_info.get('first_name', ''),
-            'given name': personal_info.get('first_name', ''),
-            'last name': personal_info.get('last_name', ''),
-            'last': personal_info.get('last_name', ''),
-            'family name': personal_info.get('last_name', ''),
-            'surname': personal_info.get('last_name', ''),
-            'full name': f"{personal_info.get('first_name', '')} {personal_info.get('last_name', '')}".strip(),
-            'name': f"{personal_info.get('first_name', '')} {personal_info.get('last_name', '')}".strip(),
-            'preferred name': personal_info.get('preferred_name', personal_info.get('first_name', '')),
+            'first name': v('first_name'),
+            'given name': v('first_name'),
+            'last name': v('last_name'),
+            'family name': v('last_name'),
+            'surname': v('last_name'),
+            'full name': full_name,
+            'preferred name': v('preferred_name') or v('first_name'),
 
             # Contact
-            'email': personal_info.get('email', ''),
-            'e-mail': personal_info.get('email', ''),
-            'email address': personal_info.get('email', ''),
-            'confirm email': personal_info.get('email', ''),
-            'confirm your email': personal_info.get('email', ''),
-            'phone': personal_info.get('phone', ''),
-            'phone number': personal_info.get('phone', ''),
-            'mobile': personal_info.get('phone', ''),
-            'mobile phone': personal_info.get('phone', ''),
-            'cell': personal_info.get('phone', ''),
-            'telephone': personal_info.get('phone', ''),
+            'email': v('email'),
+            'e-mail': v('email'),
+            'phone': v('phone'),
+            'mobile': v('phone'),
+            'cell': v('phone'),
+            'telephone': v('phone'),
 
             # Address
-            'address': personal_info.get('address', ''),
-            'street': personal_info.get('address', ''),
-            'street address': personal_info.get('address', ''),
-            'address line 1': personal_info.get('address', ''),
-            'address line 2': personal_info.get('address_line_2', ''),
-            'city': personal_info.get('city', ''),
-            'state': personal_info.get('state', ''),
-            'province': personal_info.get('state', ''),
-            'zip': personal_info.get('zip_code', ''),
-            'zip code': personal_info.get('zip_code', ''),
-            'postal code': personal_info.get('zip_code', ''),
-            'zipcode': personal_info.get('zip_code', ''),
-            'country': personal_info.get('country', 'United States'),
+            'address line 2': v('address_line_2'),
+            'address': v('address'),
+            'street': v('address'),
+            'city': v('city'),
+            'state': v('state'),
+            'province': v('state'),
+            'zip': v('zip_code'),
+            'postal code': v('zip_code'),
+            'country': v('country'),
 
-            # Professional
-            'linkedin': personal_info.get('linkedin', ''),
-            'linkedin url': personal_info.get('linkedin', ''),
-            'linkedin profile': personal_info.get('linkedin', ''),
-            'github': personal_info.get('github', ''),
-            'github url': personal_info.get('github', ''),
-            'portfolio': personal_info.get('portfolio', ''),
-            'website': personal_info.get('website', ''),
-            'personal website': personal_info.get('website', ''),
+            # Professional links
+            'linkedin': v('linkedin'),
+            'github': v('github'),
+            'portfolio': v('portfolio'),
+            'website': v('website'),
 
             # Work
-            'current company': personal_info.get('current_company', ''),
-            'current employer': personal_info.get('current_company', ''),
-            'current title': personal_info.get('current_title', ''),
-            'current position': personal_info.get('current_title', ''),
-            'years of experience': personal_info.get('years_experience', ''),
-            'experience': personal_info.get('years_experience', ''),
+            'current company': v('current_company'),
+            'current employer': v('current_company'),
+            'current title': v('current_title'),
+            'current position': v('current_title'),
+            'years of experience': v('years_experience'),
 
-            # Authorization
-            'work authorization': personal_info.get('work_authorization', 'US Citizen'),
-            'authorized to work': personal_info.get('legally_authorized', 'Yes'),
-            'legally authorized': personal_info.get('legally_authorized', 'Yes'),
-            'sponsorship': personal_info.get('requires_sponsorship', 'No'),
-            'require sponsorship': personal_info.get('requires_sponsorship', 'No'),
-            'visa sponsorship': personal_info.get('requires_sponsorship', 'No'),
-
-            # Preferences
-            'salary': personal_info.get('expected_salary_min', ''),
-            'salary expectation': personal_info.get('expected_salary_min', ''),
-            'expected salary': personal_info.get('expected_salary_min', ''),
-            'desired salary': personal_info.get('expected_salary_min', ''),
-            'willing to relocate': personal_info.get('willing_to_relocate', 'Yes'),
-            'relocate': personal_info.get('willing_to_relocate', 'Yes'),
-            'remote': personal_info.get('remote_preference', 'Flexible'),
-            'start date': personal_info.get('available_start', 'Immediately'),
-            'available': personal_info.get('available_start', 'Immediately'),
-            'notice period': personal_info.get('notice_period', '2 weeks'),
-
-            # Education
-            'education': personal_info.get('highest_education', "Bachelor's Degree"),
-            'highest education': personal_info.get('highest_education', "Bachelor's Degree"),
-            'degree': personal_info.get('highest_education', "Bachelor's Degree"),
-
-            # Source
-            'how did you hear': personal_info.get('how_did_you_hear', 'LinkedIn'),
-            'source': personal_info.get('how_did_you_hear', 'LinkedIn'),
-            'referral': personal_info.get('referral_name', ''),
-
-            # Demographics (EEOC)
-            'gender': personal_info.get('gender', 'Decline to self-identify'),
-            'race': personal_info.get('race_ethnicity', 'Decline to self-identify'),
-            'ethnicity': personal_info.get('race_ethnicity', 'Decline to self-identify'),
-            'veteran': personal_info.get('veteran_status', 'Decline to self-identify'),
-            'disability': personal_info.get('disability_status', 'Decline to self-identify'),
-
-            # Consent
-            'privacy': personal_info.get('privacy_agreement', 'Yes'),
-            'privacy agreement': personal_info.get('privacy_agreement', 'Yes'),
-            'privacy policy': personal_info.get('privacy_agreement', 'Yes'),
-            'consent': personal_info.get('data_processing_consent', 'Yes'),
-            'background check': personal_info.get('background_check_consent', 'Yes'),
-            'agree': 'Yes',
-            'i agree': 'Yes',
-            'accept': 'Yes',
+            # Preferences the user saved
+            'salary': v('expected_salary_min') or v('desired_salary'),
+            'start date': v('available_start'),
+            'notice period': v('notice_period'),
+            'highest education': v('highest_education'),
+            'degree': v('highest_education'),
+            'referral': v('referral_name'),
         }
 
-        # Check for direct match
         for key, value in mappings.items():
             if key in label_lower:
-                return value
+                return value or None
 
-        # Check for partial matches
         if 'name' in label_lower and 'first' in label_lower:
-            return personal_info.get('first_name', '')
+            return v('first_name') or None
         if 'name' in label_lower and 'last' in label_lower:
-            return personal_info.get('last_name', '')
-        if 'email' in label_lower:
-            return personal_info.get('email', '')
-        if 'phone' in label_lower or 'tel' in label_lower:
-            return personal_info.get('phone', '')
+            return v('last_name') or None
+        if label_lower.strip() in ('name', 'your name'):
+            return full_name or None
 
         return None
+
+    # ------------------------------------------------------------------
+    # Factual-question detection
+    # ------------------------------------------------------------------
+
+    # (keyword, profile key) - first match wins.
+    _FACTUAL_PROFILE_KEYS = (
+        ('sponsor', 'requires_sponsorship'),
+        ('visa', 'requires_sponsorship'),
+        ('legally authorized', 'legally_authorized'),
+        ('authorized to work', 'legally_authorized'),
+        ('eligible to work', 'legally_authorized'),
+        ('work authorization', 'work_authorization'),
+        ('citizenship', 'work_authorization'),
+        ('relocat', 'willing_to_relocate'),
+        ('background check', 'background_check_consent'),
+        ('privacy', 'privacy_agreement'),
+        ('data processing', 'data_processing_consent'),
+        ('how did you hear', 'how_did_you_hear'),
+        ('hear about', 'how_did_you_hear'),
+        ('previously applied', 'previously_applied'),
+        ('applied before', 'previously_applied'),
+        ('previously employed', 'previously_employed'),
+        ('previously worked', 'previously_employed'),
+        ('worked for', 'previously_employed'),
+        ('government', 'government_employee'),
+        ('non-compete', 'non_compete'),
+        ('non compete', 'non_compete'),
+        ('gender', 'gender'),
+        ('race', 'race_ethnicity'),
+        ('ethnic', 'race_ethnicity'),
+        ('hispanic', 'race_ethnicity'),
+        ('veteran', 'veteran_status'),
+        ('disabilit', 'disability_status'),
+    )
+
+    # Questions that are statements of fact, legal attestations, consents or
+    # EEO self-identification. The LLM must never answer these.
+    _FACTUAL_KEYWORDS = (
+        'authoriz', 'sponsor', 'visa', 'citizen', 'legally', 'eligib', 'relocat',
+        'background', 'consent', 'agree', 'accept', 'acknowledg', 'certif', 'attest',
+        'privacy', 'terms', 'policy', 'gender', 'race', 'ethnic', 'hispanic',
+        'veteran', 'disabilit', 'pronoun', 'orientation', 'transgender',
+        'date of birth', 'birth', 'convict', 'criminal', 'felony', 'clearance',
+        'how did you hear', 'hear about', 'source', 'referr', 'previously', 'worked for',
+        'employed by', 'related to', 'relative', 'government', 'compete', 'salary',
+        'compensation', 'start date', 'notice', 'signature', 'ssn',
+        'social security', 'drug', 'travel', 'shift', 'on-site', 'onsite', 'remote',
+        'commute', 'located', 'location', 'reside', 'address',
+    )
+
+    def _factual_profile_key(self, label_lower: str) -> Optional[str]:
+        for keyword, key in self._FACTUAL_PROFILE_KEYS:
+            if keyword in label_lower:
+                return key
+        return None
+
+    _FACTUAL_WORDS_RE = re.compile(r"\b(age|sex|pay|sign|18|21|over 18)\b")
+
+    def is_factual_question(self, field_label: str) -> bool:
+        label_lower = (field_label or '').lower()
+        return (any(k in label_lower for k in self._FACTUAL_KEYWORDS)
+                or bool(self._FACTUAL_WORDS_RE.search(label_lower)))
 
     async def get_field_value_with_llm(
         self,
@@ -245,31 +281,24 @@ Only return the JSON array, no other text."""
         field_type: str,
         field_options: List[str],
         personal_info: Dict,
-        resume_text: str
+        resume_text: str,
+        job_description: str = "",
     ) -> Optional[str]:
-        """Use LLM to determine the best value for a complex field."""
-        prompt = f"""Given this job application form field, determine the best value to fill in.
+        """Draft an answer for a free-text question (text/textarea only).
 
-Field Label: {field_label}
-Field Type: {field_type}
-{f"Options: {field_options}" if field_options else ""}
-
-Personal Info:
-{json.dumps(personal_info, indent=2)}
-
-Resume Summary:
-{resume_text[:2000]}
-
-Return ONLY the value to fill in, nothing else. If it's a select field, return the exact option text.
-If you can't determine a value, return "SKIP"."""
-
-        try:
-            value = self._call_llm(prompt, max_tokens=200).strip()
-            if value == "SKIP":
-                return None
-            return value
-        except Exception:
+        Factual, legal, consent, EEO and choice (select/radio/checkbox)
+        questions are never sent to the LLM; they stay blank for the user.
+        Only non-sensitive profile fields and the resume are shared.
+        """
+        if (field_type or 'text').lower() not in LLM_FREE_TEXT_TYPES:
             return None
+        if field_options:
+            return None
+        if self.is_factual_question(field_label):
+            return None
+        return await self.generate_answer_for_question(
+            field_label, personal_info, resume_text, job_description
+        )
 
     def identify_missing_fields(
         self,
@@ -303,26 +332,35 @@ If you can't determine a value, return "SKIP"."""
         personal_info: Dict,
         resume_text: str,
         job_description: str
-    ) -> str:
-        """Generate an answer for a custom application question using LLM."""
-        prompt = f"""Answer this job application question professionally and concisely.
+    ) -> Optional[str]:
+        """Draft a short answer to a free-text application question."""
+        if self.is_factual_question(question):
+            return None
+        profile = llm_safe_profile(personal_info)
+        profile_lines = "\n".join(f"- {k.replace('_', ' ').title()}: {val}" for k, val in profile.items()) or "- (none)"
+        prompt = f"""Draft a short answer to this free-text job application question.
 
 Question: {question}
 
-Personal Info:
-- Name: {personal_info.get('first_name', '')} {personal_info.get('last_name', '')}
-- Current Role: {personal_info.get('current_title', '')} at {personal_info.get('current_company', '')}
-- Experience: {personal_info.get('years_experience', '')} years
+Candidate background:
+{profile_lines}
 
 Resume:
 {resume_text[:3000]}
 
 Job Description:
-{job_description[:2000]}
+{(job_description or '')[:2000]}
 
-Write a professional, concise answer (2-3 sentences max). Be specific and relevant to the role."""
+Rules:
+- Base the answer only on the resume and background above; do not invent facts.
+- Do not make statements about work authorization, visa or sponsorship status,
+  relocation, availability, salary, consent, or any demographic information.
+- 2-3 sentences max. If the question cannot be answered from the resume, reply exactly SKIP."""
 
         try:
-            return self._call_llm(prompt, max_tokens=300).strip()
-        except Exception as e:
-            return f"Please see my resume for details regarding {question.lower()}"
+            answer = self._call_llm(prompt, max_tokens=300).strip()
+        except Exception:
+            return None
+        if not answer or answer.upper() == "SKIP":
+            return None
+        return answer

@@ -1,6 +1,27 @@
-# AutoApply
+# AIApply (AutoApply)
 
 Automated job application tool with AI-powered resume tailoring using Claude API.
+Repository: `schundu009/aiapply` · Production: https://aiapply.up.railway.app (Cariara admins only)
+
+## Access and safety model
+
+- **Admin-only.** Every page, API route, SSE stream, static file and download requires a
+  Cariara access token (from `https://cariara-backend.up.railway.app/auth/login`) sent as
+  `Authorization: Bearer <token>` or via the `/login` page cookie. The token is verified with
+  `JWT_SECRET_KEY` / `JWT_ALGORITHM` (same values as `cariara-backend`) and the user must have
+  the `admin`, `administrator`, `manager` or `developer` role (re-checked against the backend's
+  `/auth/me`, cached 60s). Only `/healthz` is public. Without `JWT_SECRET_KEY` the app returns 503.
+- **No credentials.** The app never stores job-site/Google/LinkedIn/ATS passwords, never creates
+  accounts and never signs in for you. If a site shows a sign-in wall, the run stops with
+  "sign in manually".
+- **No evasion.** Standard Playwright Chromium; no automation-flag hiding, user-agent or
+  location spoofing, or artificial delays. CAPTCHAs are detected and left for you to complete.
+- **No invented answers.** Work authorization, sponsorship, relocation, consents, EEO and
+  "how did you hear" answers come only from your saved profile; blank stays blank. The LLM only
+  drafts free-text answers and only sees non-sensitive profile fields plus your resume.
+- **No auto-submit by default.** Runs stop at review; `auto_submit` must be explicitly `true`.
+
+Run tests with `pip install -r requirements.txt -r requirements-dev.txt && pytest`.
 
 ## Features
 
