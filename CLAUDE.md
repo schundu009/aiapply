@@ -43,7 +43,7 @@ autoapply/
 ## Critical Patterns & Rules
 
 ### 0. Security rules (do not regress)
-- Every route requires a Cariara admin JWT (`src/auth.py`); only `/healthz`, `/login`, `/logout` are public.
+- Every route requires a Cariara admin JWT (`src/auth.py`); only `/healthz`, `/login`, `/logout` and the Google sign-in endpoints (`/login/google`, `/auth/callback`, `/auth/session` -- same-origin POST only) are public.
 - Never store, request or use passwords for job sites/Google/LinkedIn/ATS; never create accounts or log in.
 - No stealth: no AutomationControlled flag, UA spoofing, fake geolocation or human-like delays. Detect CAPTCHAs and stop.
 - No hardcoded factual answers (authorization, sponsorship, relocation, consents, EEO, "how did you hear").
